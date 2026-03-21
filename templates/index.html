@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MatSci Workstation · 全能材料科学科研工作站</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', 'PingFang SC', sans-serif; background: #0a0a0a; color: #d4d4d4; min-height: 100vh; }
+    .page { display: flex; flex-direction: column; height: 100vh; }
+
+    header {
+      background: #111317; border-bottom: 1px solid #1e2230; padding: 0 24px; height: 58px;
+      display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
+    }
+
+    .header-brand { display: flex; align-items: center; gap: 10px; }
+    .logo-icon { width: 34px; height: 34px; background: linear-gradient(135deg, #008b8b, #00bcd4); border-radius: 10px; display: flex; align-items: center; justify-content: center; }
+    .logo-icon svg { width: 20px; height: 20px; }
+    .header-brand h1 { font-size: 1rem; font-weight: 700; color: #fff; }
+    .header-brand p { font-size: 0.7rem; color: #4b5563; }
+    .header-nav { display: flex; gap: 6px; }
+    .nav-btn { background: none; border: none; color: #6b7280; font-size: 0.82rem; padding: 6px 14px; border-radius: 8px; cursor: pointer; transition: all .15s; }
+    .nav-btn.active, .nav-btn:hover { background: #1e2230; color: #d4d4d4; }
+    .header-right { display: flex; align-items: center; gap: 10px; }
+    .ai-badge { background: #0d2a1a; border: 1px solid #166534; color: #4ade80; font-size: 0.7rem; padding: 3px 10px; border-radius: 20px; display: flex; align-items: center; gap: 5px; }
+    .ai-badge .dot { width: 6px; height: 6px; background: #4ade80; border-radius: 50%; animation: pulse 2s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+    .workspace { display: grid; grid-template-columns: 220px 1fr 250px; flex: 1; overflow: hidden; }
+    .panel { display: flex; flex-direction: column; overflow: hidden; }
+    .panel-header { padding: 14px 16px 10px; border-bottom: 1px solid #1e2230; flex-shrink: 0; }
+    .panel-label { font-size: 0.62rem; color: #008b8b; text-transform: uppercase; letter-spacing: .1em; font-weight: 700; margin-bottom: 4px; }
+    .panel-title { font-size: 0.95rem; font-weight: 700; color: #fff; }
+    .panel-body { flex: 1; overflow-y: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 14px; }
+
+    .left-panel { background: #0e1016; border-right: 1px solid #1e2230; }
+    .field-label { font-size: 0.68rem; color: #6b7280; text-transform: uppercase; letter-spacing: .06em; font-weight: 600; margin-bottom: 6px; display: block; }
+    .text-input { width: 100%; background: #161920; border: 1px solid #2a2d3e; border-radius: 8px; color: #e0e0e0; font-size: 0.85rem; padding: 8px 11px; outline: none; transition: border-color .2s; }
+    .text-input:focus { border-color: #008b8b; }
+
+    .icon-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+    .icon-btn { background: #161920; border: 1px solid #2a2d3e; border-radius: 10px; color: #9ca3af; font-size: 0.72rem; padding: 10px 6px; cursor: pointer; transition: all .2s; display: flex; flex-direction: column; align-items: center; gap: 5px; }
+    .icon-btn svg { width: 20px; height: 20px; }
+    .icon-btn.active { background: #0d2a2a; border-color: #008b8b; color: #00bcd4; }
+    .icon-btn:hover:not(.active) { border-color: #374151; color: #d4d4d4; }
+
+    .radio-group { display: flex; flex-direction: column; gap: 6px; }
+    .radio-option { display: flex; align-items: center; gap: 9px; background: #161920; border: 1px solid #2a2d3e; border-radius: 8px; padding: 8px 12px; cursor: pointer; transition: all .2s; }
+    .radio-option input { accent-color: #008b8b; width: 14px; height: 14px; cursor: pointer; }
+    .radio-option.selected { border-color: #008b8b; background: #0d2a2a; }
+    .radio-option span { font-size: 0.8rem; color: #c4c9d4; }
+
+    .check-option { display: flex; align-items: center; gap: 9px; padding: 6px 0; cursor: pointer; }
+    .check-option input { accent-color: #008b8b; width: 14px; height: 14px; cursor: pointer; }
+    .check-option span { font-size: 0.8rem; color: #c4c9d4; }
+
+    .mid-panel { background: #0a0a0a; border-right: 1px solid #1e2230; }
+    .upload-zone { border: 1.5px dashed #2a2d3e; border-radius: 10px; padding: 18px; text-align: center; cursor: pointer; transition: border-color .2s; background: #0e1016; position: relative; overflow: hidden; }
+    .upload-zone:hover { border-color: #008b8b; }
+    .upload-zone input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+    .upload-zone p { font-size: 0.78rem; color: #6b7280; }
+    .upload-zone small { font-size: 0.68rem; color: #374151; }
+    #ref-preview { max-width: 100%; max-height: 100px; border-radius: 6px; display: none; margin-top: 8px; }
+
+    .desc-area { width: 100%; background: #0e1016; border: 1px solid #2a2d3e; border-radius: 10px; color: #e0e0e0; font-size: 0.85rem; line-height: 1.6; padding: 12px; resize: vertical; min-height: 170px; outline: none; transition: border-color .2s; font-family: inherit; }
+    .desc-area:focus { border-color: #008b8b; }
+
+    .opts-row { display: flex; gap: 8px; }
+    .opts-row select { flex: 1; background: #161920; border: 1px solid #2a2d3e; border-radius: 8px; color: #c4c9d4; font-size: 0.8rem; padding: 7px 10px; outline: none; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 8px center; padding-right: 26px; }
+
+    .gen-btn { width: 100%; padding: 13px; background: linear-gradient(135deg, #008b8b, #00a3a3); border: none; border-radius: 10px; color: #fff; font-size: 0.95rem; font-weight: 700; cursor: pointer; transition: all .2s; letter-spacing: .02em; display: flex; align-items: center; justify-content: center; gap: 8px; }
+    .gen-btn:hover { background: linear-gradient(135deg, #00a3a3, #00bcd4); box-shadow: 0 0 20px #008b8b44; }
+    .gen-btn:disabled { background: #1e2230; cursor: not-allowed; color: #374151; }
+
+    #canvas { flex: 1; display: flex; align-items: center; justify-content: center; border: 1px solid #1e2230; border-radius: 10px; min-height: 240px; background: #0e1016; overflow: hidden; position: relative; }
+    .placeholder-hint { text-align: center; color: #2a2d3e; display: flex; flex-direction: column; align-items: center; gap: 12px; }
+    .placeholder-hint svg { width: 56px; height: 56px; opacity: .4; }
+    .svg-wrapper { width: 100%; height: 100%; }
+    #canvas svg { width: 100%; height: 100%; }
+    .spinner-wrap { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+    .spinner { width: 40px; height: 40px; border: 3px solid #1e2230; border-top-color: #008b8b; border-radius: 50%; animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .canvas-status { font-size: 0.8rem; color: #6b7280; }
+    .canvas-error { font-size: 0.82rem; color: #f87171; text-align: center; padding: 16px; line-height: 1.5; }
+
+    .action-row { display: flex; gap: 8px; flex-wrap: wrap; }
+    .action-row button, .action-row .act-btn { background: #161920; border: 1px solid #2a2d3e; border-radius: 8px; color: #c4c9d4; font-size: 0.78rem; padding: 8px 14px; cursor: pointer; transition: all .15s; display: inline-flex; align-items: center; gap: 5px; }
+    .action-row .act-btn.primary { background: #008b8b; border-color: #008b8b; color: #fff; }
+    .action-row button:hover, .action-row .act-btn:hover { border-color: #008b8b; color: #00bcd4; }
+
+    .history-header { font-size: 0.68rem; color: #6b7280; text-transform: uppercase; letter-spacing: .06em; font-weight: 600; }
+    .hist-list { display: flex; flex-direction: column; gap: 8px; }
+    .hist-item { background: #111317; border: 1px solid #1e2230; border-radius: 8px; padding: 10px; font-size: 0.75rem; color: #c4c9d4; display: flex; flex-direction: column; gap: 4px; }
+    .hist-item small { color: #6b7280; }
+    .hist-item button { align-self: flex-start; }
+
+    .right-panel { background: #0e1016; }
+    .pdf-zone { border: 1.5px dashed #2a2d3e; border-radius: 10px; padding: 20px; text-align: center; cursor: pointer; transition: border-color .2s; position: relative; }
+    .pdf-zone:hover { border-color: #008b8b; }
+    .pdf-zone input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+    .pdf-zone svg { width: 28px; height: 28px; margin: 0 auto 8px; display: block; }
+    .param-table { width: 100%; border-collapse: collapse; font-size: 0.73rem; }
+    .param-table th { background: #161920; color: #6b7280; font-weight: 600; padding: 6px 8px; text-align: left; border-bottom: 1px solid #2a2d3e; }
+    .param-table td { padding: 6px 8px; border-bottom: 1px solid #1e2230; color: #c4c9d4; vertical-align: top; }
+    .param-table tr:hover td { background: #161920; }
+    .param-tag { display: inline-block; background: #0d2a2a; border: 1px solid #008b8b; color: #00bcd4; font-size: 0.65rem; padding: 2px 7px; border-radius: 10px; }
+    .sync-btn { width: 100%; padding: 10px; background: #0d2a2a; border: 1px solid #008b8b; border-radius: 8px; color: #00bcd4; font-size: 0.82rem; font-weight: 600; cursor: pointer; transition: all .2s; display: flex; align-items: center; justify-content: center; gap: 6px; }
+    .sync-btn:hover { background: #008b8b; color: #fff; }
+    .info-box { font-size: 0.72rem; color: #4b5563; line-height: 1.5; background: #0e1016; border-left: 2px solid #008b8b44; padding: 8px 10px; border-radius: 0 6px 6px 0; }
+    #pdf-status { font-size: 0.75rem; color: #6b7280; display: none; text-align: center; padding: 10px 0; }
+    .hist-strip { display: none; }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header>
+      <div class="header-brand">
+        <div class="logo-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2">
+            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <div>
+          <h1>MatSci Workstation</h1>
+          <p>全能材料科学科研工作站</p>
+        </div>
+      </div>
+      <nav class="header-nav">
+        <button class="nav-btn active">工作台</button>
+        <button class="nav-btn">历史记录</button>
+        <button class="nav-btn">模板库</button>
+        <button class="nav-btn">设置</button>
+      </nav>
+      <div class="header-right">
+        <div class="ai-badge"><div class="dot"></div> AI 就绪</div>
+        <div class="avatar">研</div>
+      </div>
+    </header>
+
+    <div class="workspace">
+      <div class="panel left-panel">
+        <div class="panel-header">
+          <div class="panel-label">⚗ Style Engine</div>
+          <div class="panel-title">风格配置引擎</div>
+        </div>
+        <div class="panel-body">
+          <div>
+            <label class="field-label">研究材料</label>
+            <input id="material" class="text-input" type="text" value="NCM523" placeholder="如 NCM523, LFP, LLZO…">
+          </div>
+          <div>
+            <label class="field-label">图标分类</label>
+            <div class="icon-grid">
+              <button class="icon-btn active" data-type="机理图" onclick="selectType(this)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.22 4.22l2.12 2.12M17.66 17.66l2.12 2.12M2 12h3M19 12h3M4.22 19.78l2.12-2.12M17.66 6.34l2.12-2.12" stroke-linecap="round"/>
+                </svg>
+                机理图
+              </button>
+              <button class="icon-btn" data-type="结构模型" onclick="selectType(this)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <path d="M12 2l8 4.5v9L12 20l-8-4.5v-9L12 2z" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M12 2v18M4 6.5l8 4.5 8-4.5" stroke-linecap="round"/>
+                </svg>
+                结构模型
+              </button>
+              <button class="icon-btn" data-type="实验流程图" onclick="selectType(this)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <path d="M9 3H5a2 2 0 00-2 2v4a2 2 0 002 2h4a2 2 0 002-2V5a2 2 0 00-2-2zM19 3h-4a2 2 0 00-2 2v4a2 2 0 002 2h4a2 2 0 002-2V5a2 2 0 00-2-2zM9 13H5a2 2 0 00-2 2v4a2 2 0 002 2h4a2 2 0 002-2v-4a2 2 0 00-2-2zM19 13h-4a2 2 0 00-2 2v4a2 2 0 002 2h4a2 2 0 002-2v-4a2 2 0 00-2-2z"/>
+                </svg>
+                实验流程图
+              </button>
+              <button class="icon-btn" data-type="数据对比图" onclick="selectType(this)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <path d="M18 20V10M12 20V4M6 20v-6" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                数据对比图
+              </button>
+            </div>
+          </div>
+          <div>
+            <label class="field-label">渲染维度</label>
+            <div class="radio-group" id="render-group">
+              <label class="radio-option selected">
+                <input type="radio" name="render" value="3D" checked onchange="syncRadio(this)">
+                <span>3D 艺术渲染</span>
+              </label>
+              <label class="radio-option">
+                <input type="radio" name="render" value="2D" onchange="syncRadio(this)">
+                <span>2D 矢量平面</span>
+              </label>
+              <label class="radio-option">
+                <input type="radio" name="render" value="线稿" onchange="syncRadio(this)">
+                <span>学术线稿</span>
+              </label>
+            </div>
+          </div>
+          <div>
+            <label class="field-label">视觉预设</label>
+            <label class="check-option"><input type="checkbox" id="nature-style" checked><span>Nature/Science 风格</span></label>
+            <label class="check-option"><input type="checkbox" id="hi-contrast"><span>高对比度</span></label>
+            <label class="check-option"><input type="checkbox" id="submit-mode"><span>直接投稿模式</span></label>
+          </div>
+        </div>
+        <div class="status-bar"><div class="dot"></div><span id="status-text">NCM523 · 机理图 · 3D 艺术渲染</span></div>
+      </div>
+
+      <div class="panel mid-panel">
+        <div class="panel-header">
+          <div class="panel-label">✦ Creative Core</div>
+          <div class="panel-title">创作核心画布</div>
+        </div>
+        <div class="panel-body">
+          <div>
+            <label class="field-label">风格参考图（可选）</label>
+            <div class="upload-zone" id="ref-zone">
+              <input type="file" accept="image/*" id="ref-upload" onchange="previewRef(this)">
+              <div class="upload-icon">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2">
+                  <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </div>
+              <p>拖拽图片或点击上传</p>
+              <small>AI 将提取图片的视觉风格进行模仿 · 最大 10MB</small>
+              <img id="ref-preview" alt="preview">
+            </div>
+          </div>
+          <div>
+            <label class="field-label">机理描述</label>
+            <textarea class="desc-area" id="description" placeholder="请描述 Se-C 网络包覆 NCM523 颗粒、Se-C 混合导电框架、电子与锂离子传输路径等机理细节…"></textarea>
+          </div>
+          <div class="opts-row">
+            <select id="ratio">
+              <option value="16:9">16:9 横版</option>
+              <option value="4:3">4:3</option>
+              <option value="1:1">1:1 方形</option>
+              <option value="9:16">9:16 竖版</option>
+            </select>
+            <select id="size">
+              <option value="2K">2K 高清</option>
+              <option value="1K">1K 标准</option>
+            </select>
+          </div>
+          <button class="gen-btn" id="gen-btn" onclick="generateSvg()">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" stroke-linejoin="round"/></svg>
+            生成高质感科研图
+          </button>
+          <div id="canvas">
+            <div class="placeholder-hint">
+              <svg viewBox="0 0 64 64" fill="none"><rect x="4" y="10" width="56" height="44" rx="6" stroke="#2a2d3e" stroke-width="2"/><circle cx="22" cy="26" r="5" stroke="#2a2d3e" stroke-width="2"/><path d="M4 42l14-12 10 10 8-8 14 14" stroke="#2a2d3e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <p>配置参数并输入机理描述，点击生成即可在下方预览 SVG 科研图</p>
+            </div>
+          </div>
+          <div class="action-row" id="action-row" style="display:none"></div>
+          <div>
+            <div class="history-header">生成历史</div>
+            <div class="hist-list" id="history-items"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel right-panel">
+        <div class="panel-header">
+          <div class="panel-label">📄 PDF Insight</div>
+          <div class="panel-title">书语文献助手</div>
+        </div>
+        <div class="panel-body">
+          <div>
+            <label class="field-label">上传文献</label>
+            <div class="pdf-zone" id="pdf-zone">
+              <input type="file" accept=".pdf" id="pdf-upload" onchange="uploadPDF(this)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="1.5"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" stroke-linecap="round" stroke-linejoin="round"/><polyline points="14 2 14 8 20 8" stroke-linecap="round" stroke-linejoin="round"/><line x1="16" y1="13" x2="8" y2="13" stroke-linecap="round"/><line x1="16" y1="17" x2="8" y2="17" stroke-linecap="round"/><polyline points="10 9 9 9 8 9" stroke-linecap="round"/></svg>
+              <p>拖拽 PDF 至此处或点击选择</p>
+              <small>支持扫描图片 & 图片文本 · 解析温度/浓度等参数</small>
+            </div>
+          </div>
+          <div class="info-box">上传文献后，AI 会用视觉方式识别页面文字与图像，并提取温度、浓度等关键参数，随后可同步至创作画布。</div>
+          <div id="param-area" style="display:none; flex-direction:column; gap:10px;">
+            <label class="field-label">提取参数</label>
+            <div style="overflow-x:auto;"><table class="param-table" id="param-table"><thead><tr><th>参数</th><th>数值</th><th>单位</th></tr></thead><tbody id="param-body"></tbody></table></div>
+            <button class="sync-btn" id="sync-btn" onclick="syncToCanvas()">↗ 一键同步至创作画布</button>
+          </div>
+          <div id="pdf-status"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let figType = '机理图';
+    let renderMode = '3D';
+    let extractedParams = [];
+    let lastSvg = '';
+    let lastPrompt = '';
+
+    function selectType(btn) {
+      document.querySelectorAll('.icon-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      figType = btn.dataset.type;
+      updateStatusBar();
+    }
+
+    function syncRadio(input) {
+      renderMode = input.value;
+      document.querySelectorAll('.radio-option').forEach(el => el.classList.remove('selected'));
+      input.closest('.radio-option').classList.add('selected');
+      updateStatusBar();
+    }
+
+    function updateStatusBar() {
+      const mat = document.getElementById('material').value.trim() || 'NCM523';
+      document.getElementById('status-text').textContent = `${mat} · ${figType} · ${renderMode} 艺术渲染`;
+    }
+
+    document.getElementById('material').addEventListener('input', updateStatusBar);
+
+    function previewRef(input) {
+      const file = input.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = e => {
+        const img = document.getElementById('ref-preview');
+        img.src = e.target.result;
+        img.style.display = 'block';
+        document.querySelector('#ref-zone p').textContent = file.name;
+      };
+      reader.readAsDataURL(file);
+    }
+
+    async function generateSvg() {
+      const description = document.getElementById('description').value.trim();
+      if (!description) {
+        alert('请输入机理描述以便生成 SVG');
+        return;
+      }
+      const material = document.getElementById('material').value.trim() || 'NCM523';
+      const natureStyle = document.getElementById('nature-style').checked;
+      const hiContrast = document.getElementById('hi-contrast').checked;
+      const ratio = document.getElementById('ratio').value;
+      const size = document.getElementById('size').value;
+      const btn = document.getElementById('gen-btn');
+      const canvas = document.getElementById('canvas');
+      const actionRow = document.getElementById('action-row');
+
+      const promptRes = await fetch('/build-prompt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ material, fig_type: figType, render_mode: renderMode, description, nature_style: natureStyle, params: extractedParams })
+      });
+      const { prompt } = await promptRes.json();
+
+      let finalPrompt = prompt + ` Composition info: ratio ${ratio}, size ${size}.`;
+      if (hiContrast) finalPrompt += ' High contrast, sharp labels.';
+
+      btn.disabled = true;
+      btn.innerHTML = '<div class="spinner" style="width:18px;height:18px;border-width:2px;margin:0"></div> 生成中…';
+      canvas.innerHTML = '<div class="spinner-wrap"><div class="spinner"></div><p class="canvas-status">正在让 Claude 3.5 输出 SVG…</p></div>';
+      actionRow.style.display = 'none';
+
+      try {
+        const res = await fetch('/generate-svg', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt: finalPrompt })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          canvas.innerHTML = `<div class="canvas-error">⚠ 生成失败<br><small>${data.error || '未知错误'}</small></div>`;
+          return;
+        }
+        lastSvg = data.svg;
+        lastPrompt = data.prompt;
+        canvas.innerHTML = `<div class="svg-wrapper">${data.svg}</div>`;
+        actionRow.style.display = 'flex';
+        actionRow.innerHTML = `
+          <button class="act-btn primary" onclick="copySvg()">⎘ 复制 SVG</button>
+          <button class="act-btn" onclick="copyPrompt()">⎘ 复制提示词</button>
+          <button class="act-btn" onclick="saveDescription()">✎ 保存描述</button>
+        `;
+        loadHistory();
+      } catch (err) {
+        canvas.innerHTML = `<div class="canvas-error">⚠ 请求错误：${err.message}</div>`;
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" stroke-linejoin="round"/></svg> 生成高质感科研图';
+      }
+    }
+
+    function copySvg() {
+      if (!lastSvg) return;
+      navigator.clipboard.writeText(lastSvg).then(() => alert('SVG 代码已复制'));
+    }
+
+    function copyPrompt() {
+      if (!lastPrompt) return;
+      navigator.clipboard.writeText(lastPrompt).then(() => alert('提示词已复制'));
+    }
+
+    function saveDescription() {
+      const desc = document.getElementById('description');
+      desc.value = desc.value.trim() + '\n\n[SVG 已生成]';
+    }
+
+    document.getElementById('description').addEventListener('keydown', e => {
+      if (e.ctrlKey && e.key === 'Enter') generateSvg();
+    });
+
+    async function loadHistory() {
+      try {
+        const res = await fetch('/history');
+        const items = await res.json();
+        const list = document.getElementById('history-items');
+        if (!items.length) {
+          list.innerHTML = '<span style="font-size:.72rem;color:#374151">暂无记录</span>';
+          return;
+        }
+        list.innerHTML = items.map(item => `
+          <div class="hist-item">
+            <small>${new Date(item.timestamp).toLocaleString()}</small>
+            <div>${item.summary}</div>
+            <button onclick="useHistoryPrompt(${encodeURIComponent(JSON.stringify(item.prompt))})">复制该提示词</button>
+          </div>
+        `).join('');
+      } catch (err) { }
+    }
+
+    function useHistoryPrompt(encoded) {
+      const prompt = decodeURIComponent(encoded);
+      document.getElementById('description').value = prompt;
+      alert('提示词已填入描述框，可继续微调');
+    }
+
+    async function uploadPDF(input) {
+      const file = input.files[0];
+      if (!file) return;
+      const status = document.getElementById('pdf-status');
+      const paramArea = document.getElementById('param-area');
+      status.style.display = 'block';
+      status.textContent = '正在识别 PDF 图像内容并提取参数…';
+      paramArea.style.display = 'none';
+      document.querySelector('#pdf-zone p').textContent = file.name;
+      const form = new FormData();
+      form.append('pdf', file);
+      try {
+        const res = await fetch('/pdf-insight', { method: 'POST', body: form });
+        const data = await res.json();
+        if (!res.ok || data.error) {
+          status.textContent = '⚠ ' + (data.error || '解析失败');
+          return;
+        }
+        extractedParams = data.params || [];
+        if (!extractedParams.length) {
+          status.textContent = '未提取到参数，请确认 PDF 内容清晰';
+          return;
+        }
+        status.style.display = 'none';
+        paramArea.style.display = 'flex';
+        const tbody = document.getElementById('param-body');
+        tbody.innerHTML = extractedParams.map(p => `
+          <tr>
+            <td><span class="param-tag">${p['参数'] || ''}</span></td>
+            <td>${p['数值'] || ''}</td>
+            <td>${p['单位'] || ''}</td>
+          </tr>
+        `).join('');
+      } catch (err) {
+        status.textContent = '⚠ 请求错误：' + err.message;
+      }
+    }
+
+    function syncToCanvas() {
+      if (!extractedParams.length) return;
+      const lines = extractedParams.map(p => `${p['参数'] || ''}: ${p['数值'] || ''}${p['单位'] ? ' ' + p['单位'] : ''}`).join('\n');
+      const ta = document.getElementById('description');
+      const sep = ta.value.trim() ? '\n\n[文献参数]\n' : '[文献参数]\n';
+      ta.value = ta.value.trim() + sep + lines;
+      ta.focus();
+      ta.scrollTop = ta.scrollHeight;
+      const btn = document.getElementById('sync-btn');
+      btn.textContent = '✓ 已同步';
+      setTimeout(() => { btn.innerHTML = '↗ 一键同步至创作画布'; }, 1500);
+    }
+
+    loadHistory();
+  </script>
+</body>
+</html>
