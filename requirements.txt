@@ -1,5 +1,17 @@
-streamlit>=1.28.0
+# Python 版本要求
+# Requires Python >=3.9,<3.14
+
+# Streamlit - 固定版本避免兼容性问题
+streamlit>=1.28.0,<1.50
+
+# Claude API SDK
 anthropic>=0.39.0
+
+# PDF 处理
 pymupdf>=1.24.0
+
+# Word 文档处理
 python-docx>=0.8.11
+
+# 重试机制
 tenacity>=8.2.0
