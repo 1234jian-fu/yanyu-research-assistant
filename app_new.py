@@ -1,5 +1,5 @@
 """
-研语·工科科研助手 v4.0 (YanYu OS)
+学研·工科科研助手 v4.0 (YanYu OS)
 15+功能矩阵 · 板块锚定 · 零篡位执行 · 影子合著者 · 语言基因深度提取
 """
 
@@ -24,7 +24,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 
 # ── Configuration ────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="研语·工科科研助手 v3.1",
+    page_title="学研·工科科研助手 v3.1",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -487,7 +487,7 @@ def create_strict_prompt(
 
     # 基础注入
     base_injection = f"""
-# YanYu OS v4.0 - 零篡位执行系统
+# XueYan OS v4.0 - 零篡位执行系统
 ## 🔒 当前配置
 - **功能模式**: {function}
 - **论文板块**: {section}
@@ -531,8 +531,9 @@ def create_strict_prompt(
     if section == "结果" and "ML" in domain:
         base_injection += ML_CHECKLIST + "\n"
 
-    # 添加标杆文献风格（影子合著者）
-    if reference_styles:
+    # 添加标杆文献风格（影子合著者：仅限起草/构思类功能）
+    shadow_functions = {"✍️ 逐段起草", "💡 研究想法构思", "📄 节节头脑风暴"}
+    if reference_styles and function in shadow_functions:
         base_injection += "\n## 📚 影子合著者：标杆文献语言基因\n"
         base_injection += "\n".join(reference_styles)
         base_injection += "\n\n**模仿指令**: 严格模仿上述标杆文献的句长、连接词、语态和复杂性偏好。\n"
@@ -723,7 +724,7 @@ def create_strict_prompt(
 [详细说明修改内容和理由]
 """,
 
-        "📝 引用验证": f"""{base_inclusion}
+        "📝 引用验证": f"""{base_injection}
 
 # 📝 任务：引用格式验证
 ## 输入文本
@@ -866,7 +867,7 @@ def extract_text(file_bytes: bytes, filename: str) -> str:
 def create_docx_with_redlines(original: str, revised: str, metadata: dict) -> bytes:
     """创建带修订痕迹的Word文档"""
     doc = Document()
-    doc.add_heading(f"研语·修订模式 - {metadata['function']}", 0)
+    doc.add_heading(f"学研·修订模式 - {metadata['function']}", 0)
 
     # 元信息
     p = doc.add_paragraph()
@@ -909,7 +910,7 @@ def create_docx_with_redlines(original: str, revised: str, metadata: dict) -> by
 def create_docx(content: str, metadata: dict) -> bytes:
     """创建 Word 文档"""
     doc = Document()
-    doc.add_heading(f"研语·工科科研助手 - {metadata['function']}", 0)
+    doc.add_heading(f"学研·工科科研助手 - {metadata['function']}", 0)
 
     # 元信息
     p = doc.add_paragraph()
@@ -952,7 +953,7 @@ st.markdown("""
 
 st.markdown("""
 <div class="main-header">
-    <h1>🧪 研语·工科科研助手 v4.0</h1>
+    <h1>🧪 学研·工科科研助手 v4.0</h1>
     <p style="margin: 0.5rem 0 0 0; opacity: 0.9;">15+功能矩阵 · 板块锚定 · 零篡位执行 · 影子合著者 · 语言基因深度提取</p>
 </div>
 """, unsafe_allow_html=True)
@@ -1048,18 +1049,10 @@ section_tabs = st.tabs([
 
 # 确定当前板块
 section_names = ["摘要", "引言", "方法", "结果", "讨论", "结论"]
-for i, tab in enumerate(section_tabs):
-    # 使用 session state 追踪当前 tab
-    tab_key = f"tab_{section_names[i]}"
-    if tab_key not in st.session_state:
-        st.session_state[tab_key] = False
-
-# 选择当前激活的 tab
 current_section = section_names[0]
 for i, tab in enumerate(section_tabs):
-    if tab:
+    with tab:
         current_section = section_names[i]
-        break
 
 # ── 主区域：左右分栏对比 ─────────────────────────────────────────────────────
 
@@ -1248,7 +1241,7 @@ else:
 st.markdown("""
 ---
 <div style="text-align: center; color: #64748b; font-size: 0.8rem; padding: 2rem 0;">
-    <p><strong>🧪 研语·工科科研助手 v4.0</strong></p>
+    <p><strong>🧪 学研·工科科研助手 v4.0</strong></p>
     <p>15+功能矩阵 · 板块锚定 · 零篡位执行 · 影子合著者 · 语言基因深度提取</p>
     <p>🔬 9大学科领域 · 📚 本地学术库集成 · ⏰ 版本时光机 · 📋 Redlining支持</p>
 </div>
