@@ -1082,6 +1082,10 @@ section_tabs = st.tabs([
 section_names = ["摘要", "引言", "方法", "结果", "讨论", "结论"]
 
 
+def sync_current_input(input_key: str) -> None:
+    st.session_state.current_input = st.session_state.get(input_key, "")
+
+
 def render_section(section_name: str) -> None:
     # ── 主区域：左右分栏对比 ─────────────────────────────────────────────────
     st.markdown("---")
@@ -1092,15 +1096,17 @@ def render_section(section_name: str) -> None:
         input_key = f"input_{section_name}"
         output_key = f"output_{section_name}"
         note_key = f"note_{section_name}"
+        if input_key not in st.session_state:
+            st.session_state[input_key] = st.session_state.get("current_input", "")
         current_input = st.text_area(
             "",
-            value=st.session_state.get(input_key, st.session_state.get("current_input", "")),
+            value=st.session_state.get(input_key, ""),
             height=400,
             label_visibility="collapsed",
-            key=input_key
+            key=input_key,
+            on_change=sync_current_input,
+            args=(input_key,)
         )
-        st.session_state[input_key] = current_input
-        st.session_state.current_input = current_input
 
         st.caption(f"📊 {len(current_input)} 字符 | 语言: {'中文' if detect_language(current_input) == 'zh' else '英文'}")
 
