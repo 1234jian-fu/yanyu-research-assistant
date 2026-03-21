@@ -471,7 +471,7 @@ def create_strict_prompt(
 ) -> str:
     """创建单一职责 prompt，严格功能隔离 v2.0"""
 
-    # 语言锁定强制声明
+    # 语言锁定强制声明（翻译功能除外）
     lang_lock = {
         "zh": """## ⚠️ 语言锁定（强制执行）
 1. **检测到中文输入**：全程使用中文处理
@@ -483,6 +483,17 @@ def create_strict_prompt(
 2. **Zero Translation**: Strictly forbidden from translating to any other language
 3. **Output Language Lock**: All output must be in English
 4. **Term Protection**: Preserve non-English technical terms as-is"""
+    }
+
+    translation_lock = {
+        "zh": """## ✅ 翻译模式语言锁定
+1. **检测到中文输入**：必须翻译为英文
+2. **输出语言锁定**：仅允许英文输出
+3. **术语保护**：英文专有名词与 LaTeX 公式保持原样""",
+        "en": """## ✅ 翻译模式语言锁定
+1. **English Input Detected**: Must translate to Chinese
+2. **Output Language Lock**: Output must be Chinese only
+3. **Term Protection**: Preserve non-English technical terms and LaTeX as-is"""
     }
 
     # 基础注入
@@ -498,7 +509,7 @@ def create_strict_prompt(
 ## 📚 本地学术库
 已加载 {len(LOCAL_SKILLS)} 个学术 Skills
 
-{lang_lock.get(lang, '')}
+{translation_lock.get(lang, '') if function == "📝 中转英翻译" else lang_lock.get(lang, '')}
 """
 
     # 添加 Humanizer 规则
@@ -1069,136 +1080,167 @@ section_tabs = st.tabs([
 
 # 确定当前板块
 section_names = ["摘要", "引言", "方法", "结果", "讨论", "结论"]
-current_section = section_names[0]
-for i, tab in enumerate(section_tabs):
-    with tab:
-        current_section = section_names[i]
 
-# ── 主区域：左右分栏对比 ─────────────────────────────────────────────────────
 
-st.markdown("---")
-col_left, col_right = st.columns([1, 1])
-
-with col_left:
-    st.markdown(f"### 📝 原文输入 [{current_section}]")
-    current_input = st.text_area(
-        "",
-        value=st.session_state.get("current_input", ""),
-        height=400,
-        label_visibility="collapsed",
-        key=f"input_{current_section}"
-    )
-    st.session_state.current_input = current_input
-
-    st.caption(f"📊 {len(current_input)} 字符 | 语言: {'中文' if detect_language(current_input) == 'zh' else '英文'}")
-
+def render_section(section_name: str) -> None:
+    # ── 主区域：左右分栏对比 ─────────────────────────────────────────────────
     st.markdown("---")
-    btn_col1, btn_col2, btn_col3 = st.columns([3, 1, 1])
-    with btn_col1:
-        process_button = st.button(
-            f"✨ 执行 {function}",
-            type="primary",
-            use_container_width=True
+    col_left, col_right = st.columns([1, 1])
+
+    with col_left:
+        st.markdown(f"### 📝 原文输入 [{section_name}]")
+        input_key = f"input_{section_name}"
+        output_key = f"output_{section_name}"
+        note_key = f"note_{section_name}"
+        current_input = st.text_area(
+            "",
+            value=st.session_state.get(input_key, st.session_state.get("current_input", "")),
+            height=400,
+            label_visibility="collapsed",
+            key=input_key
         )
-    with btn_col2:
-        if st.button("🗑️"):
-            st.session_state.current_input = ""
-            st.rerun()
-    with btn_col3:
-        if st.button("🔄"):
-            st.rerun()
+        st.session_state[input_key] = current_input
+        st.session_state.current_input = current_input
 
-with col_right:
-    st.markdown(f"### 👁️ 处理结果 [{current_section}]")
-    result_placeholder = st.empty()
-    modification_note = st.empty()
+        st.caption(f"📊 {len(current_input)} 字符 | 语言: {'中文' if detect_language(current_input) == 'zh' else '英文'}")
 
-    if process_button and current_input.strip():
-        input_lang = detect_language(current_input)
+        st.markdown("---")
+        btn_col1, btn_col2, btn_col3 = st.columns([3, 1, 1])
+        with btn_col1:
+            process_button = st.button(
+                f"✨ 执行 {function}",
+                type="primary",
+                use_container_width=True,
+                key=f"process_{section_name}"
+            )
+        with btn_col2:
+            if st.button("🗑️", key=f"clear_{section_name}"):
+                st.session_state[input_key] = ""
+                st.session_state[output_key] = ""
+                st.session_state[note_key] = ""
+                st.session_state.current_input = ""
+                st.rerun()
+        with btn_col3:
+            if st.button("🔄", key=f"rerun_{section_name}"):
+                st.rerun()
 
-        with st.spinner(f"🔄 处理中 [{function}] | 板块: {current_section} | 领域: {domain} | 语言: {'中文' if input_lang == 'zh' else '英文'}..."):
-            try:
-                # 硬锁保护
-                protected_input, term_mapping = protect_hard_terms(current_input, domain)
+    with col_right:
+        st.markdown(f"### 👁️ 处理结果 [{section_name}]")
+        result_placeholder = st.empty()
+        modification_note = st.empty()
 
-                # 创建零篡位 prompt
-                full_prompt = create_strict_prompt(
-                    function, protected_input, current_section, domain, reference_styles, input_lang
-                )
+        # 历史结果回显
+        previous_output = st.session_state.get(output_key, "")
+        previous_note = st.session_state.get(note_key, "")
+        if previous_output:
+            result_placeholder.markdown(previous_output)
+        if previous_note:
+            modification_note.caption(previous_note)
 
-                # 调用 API
-                start_time = time.time()
-                response = call_api(full_prompt, timeout=180)
-                elapsed = time.time() - start_time
+        if process_button and current_input.strip():
+            input_lang = detect_language(current_input)
 
-                if response:
-                    # 恢复术语
-                    final_output = restore_hard_terms(response, term_mapping)
+            with st.spinner(f"🔄 处理中 [{function}] | 板块: {section_name} | 领域: {domain} | 语言: {'中文' if input_lang == 'zh' else '英文'}..."):
+                try:
+                    # 硬锁保护
+                    protected_input, term_mapping = protect_hard_terms(current_input, domain)
 
-                    # 保存到历史
-                    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    history_entry = {
-                        "id": len(st.session_state.history) + 1,
-                        "timestamp": timestamp,
-                        "function": function,
-                        "section": current_section,
-                        "domain": domain,
-                        "input_lang": input_lang,
-                        "input": current_input,
-                        "output": final_output,
-                        "elapsed": f"{elapsed:.1f}s"
-                    }
-                    st.session_state.history.insert(0, history_entry)
-                    st.session_state.history = st.session_state.history[:100]
-
-                    # 显示结果
-                    result_placeholder.markdown(final_output)
-
-                    # 修改说明
-                    modification_note.caption(
-                        f"✅ 已针对【{current_section}】完成【{function}】，"
-                        f"主要优化了语序和表达，使论证更具{'真人节奏感' if 'Humanizer' in function else '学术专业性'}"
+                    # 创建零篡位 prompt
+                    full_prompt = create_strict_prompt(
+                        function, protected_input, section_name, domain, reference_styles, input_lang
                     )
 
-                    # 导出按钮（支持redlining）
-                    st.markdown("---")
-                    export_col1, export_col2 = st.columns(2)
+                    # 调用 API
+                    start_time = time.time()
+                    response = call_api(full_prompt, timeout=180)
+                    elapsed = time.time() - start_time
 
-                    # 标准导出
-                    doc_bytes = create_docx(final_output, {
-                        "function": function,
-                        "section": current_section,
-                        "domain": domain,
-                        "timestamp": timestamp
-                    })
-                    with export_col1:
-                        st.download_button(
-                            "📥 导出 Word",
-                            doc_bytes,
-                            file_name=f"yanyu_{current_section}_{timestamp.replace(':', '-')}.docx",
-                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                        )
+                    if response:
+                        # 翻译功能结果校验
+                        if function == "📝 中转英翻译":
+                            output_lang = detect_language(response)
+                            if output_lang == input_lang:
+                                st.error("❌ 翻译校验失败：输出语言与输入相同，请重试")
+                                st.stop()
 
-                    # Redlining导出（仅限修改类功能）
-                    if function in ["✨ 表达润色", "🤖 去AI味 (Humanizer)", "🎯 精修模式"]:
-                        redline_bytes = create_docx_with_redlines(current_input, final_output, {
+                        # 恢复术语
+                        final_output = restore_hard_terms(response, term_mapping)
+
+                        # 保存到历史
+                        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        history_entry = {
+                            "id": len(st.session_state.history) + 1,
+                            "timestamp": timestamp,
                             "function": function,
-                            "section": current_section,
+                            "section": section_name,
+                            "domain": domain,
+                            "input_lang": input_lang,
+                            "input": current_input,
+                            "output": final_output,
+                            "elapsed": f"{elapsed:.1f}s"
+                        }
+                        st.session_state.history.insert(0, history_entry)
+                        st.session_state.history = st.session_state.history[:100]
+
+                        # 显示结果
+                        st.session_state[output_key] = final_output
+                        result_placeholder.markdown(final_output)
+
+                        # 修改说明（单一职责提示）
+                        if function == "🤖 去AI味 (Humanizer)":
+                            note_text = f"✅ 已针对【{section_name}】完成【{function}】，保持原语种，仅重构语序与节奏。"
+                        elif function == "📝 中转英翻译":
+                            note_text = f"✅ 已针对【{section_name}】完成【{function}】，仅进行语种转换，未做润色。"
+                        else:
+                            note_text = f"✅ 已针对【{section_name}】完成【{function}】，严格按单一职责执行。"
+
+                        st.session_state[note_key] = note_text
+                        modification_note.caption(note_text)
+
+                        # 导出按钮（支持redlining）
+                        st.markdown("---")
+                        export_col1, export_col2 = st.columns(2)
+
+                        # 标准导出
+                        doc_bytes = create_docx(final_output, {
+                            "function": function,
+                            "section": section_name,
                             "domain": domain,
                             "timestamp": timestamp
                         })
-                        with export_col2:
+                        with export_col1:
                             st.download_button(
-                                "📋 导出 Redlining",
-                                redline_bytes,
-                                file_name=f"yanyu_redline_{current_section}_{timestamp.replace(':', '-')}.docx",
+                                "📥 导出 Word",
+                                doc_bytes,
+                                file_name=f"yanyu_{section_name}_{timestamp.replace(':', '-')}.docx",
                                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                             )
 
-            except Exception as e:
-                st.error(f"❌ 处理失败: {e}")
-                if "timeout" in str(e).lower():
-                    st.warning("💡 建议：缩短文本或增加超时时间")
+                        # Redlining导出（仅限修改类功能）
+                        if function in ["✨ 表达润色", "🤖 去AI味 (Humanizer)", "🎯 精修模式"]:
+                            redline_bytes = create_docx_with_redlines(current_input, final_output, {
+                                "function": function,
+                                "section": section_name,
+                                "domain": domain,
+                                "timestamp": timestamp
+                            })
+                            with export_col2:
+                                st.download_button(
+                                    "📋 导出 Redlining",
+                                    redline_bytes,
+                                    file_name=f"yanyu_redline_{section_name}_{timestamp.replace(':', '-')}.docx",
+                                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                                )
+
+                except Exception as e:
+                    st.error(f"❌ 处理失败: {e}")
+                    if "timeout" in str(e).lower():
+                        st.warning("💡 建议：缩短文本或增加超时时间")
+
+
+for i, tab in enumerate(section_tabs):
+    with tab:
+        render_section(section_names[i])
 
 # ── 版本时光机 ─────────────────────────────────────────────────────────────
 
