@@ -8,6 +8,7 @@ import re
 import time
 import json
 import base64
+from html import escape
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from copy import deepcopy
@@ -27,6 +28,21 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Cm, Pt, RGBColor
+try:
+    from pptx import Presentation
+    from pptx.enum.shapes import MSO_AUTO_SHAPE_TYPE
+    from pptx.util import Inches, Pt as PptxPt
+    PPTX_AVAILABLE = True
+except ModuleNotFoundError:
+    Presentation = None
+    MSO_AUTO_SHAPE_TYPE = None
+    PPTX_AVAILABLE = False
+
+    def Inches(value):
+        return value
+
+    def PptxPt(value):
+        return value
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 # ── Configuration ────────────────────────────────────────────────────────────
@@ -47,6 +63,7 @@ GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-image-preview")
 WRITING_PAGE = "✍️ 论文写作"
 FORMATTING_PAGE = "📐 格式对齐"
 VIZ_PAGE = "🎨 视觉实验室"
+PPT_PAGE = "🗂️ PPT大师"
 
 CONFIG = {
     "sections": {
@@ -587,6 +604,65 @@ VIZ_DEFAULT_STATE = {
     "is_generating": False,
     "last_error": "",
 }
+PPT_PAGE_TYPES = ["封面页", "背景页", "问题定义页", "方法页", "流程页", "结果页", "对比页", "机理页", "结论页", "展望页"]
+PPT_STYLE_MODES = ["academic-paperskills", "journal-briefing", "defense-clean"]
+PPT_DEFAULT_LAYOUTS = {
+    "左文右图": {"title": "上方标题 + 左文右图", "hint": "适合背景、方法、结果说明"},
+    "上图下文": {"title": "上图下文", "hint": "适合流程、结果展示、结构说明"},
+    "双栏对比": {"title": "双栏对比", "hint": "适合 before/after、模型对比、实验对比"},
+    "大图重点说明": {"title": "大图重点说明", "hint": "适合单图强调、机理图配说明"},
+    "结果+结论": {"title": "结果 + 结论", "hint": "适合实验结果与一句话结论并置"},
+    "机理图说明页": {"title": "机理图说明页", "hint": "适合科研绘图与关键 bullet 配合"},
+}
+PPT_PAGE_TYPE_LAYOUTS = {
+    "封面页": "大图重点说明",
+    "背景页": "左文右图",
+    "问题定义页": "左文右图",
+    "方法页": "左文右图",
+    "流程页": "上图下文",
+    "结果页": "结果+结论",
+    "对比页": "双栏对比",
+    "机理页": "机理图说明页",
+    "结论页": "结果+结论",
+    "展望页": "左文右图",
+}
+PPT_DEFAULT_STATE = {
+    "input_mode": "纯文字",
+    "page_title": "",
+    "page_type": "结果页",
+    "page_goal": "",
+    "raw_text": "",
+    "extra_notes": "",
+    "uploaded_source_name": "",
+    "uploaded_source_text": "",
+    "uploaded_images": [],
+    "reference_images": [],
+    "template_name": "默认科研模板",
+    "template_analysis": {},
+    "template_file_name": "",
+    "style_mode": "academic-paperskills",
+    "text_simplify_level": "中",
+    "info_density": "中",
+    "keep_original_images": True,
+    "allow_external_support": False,
+    "generate_aux_figure": False,
+    "apply_template_layout": True,
+    "processed_text_variants": {},
+    "selected_layout": "结果+结论",
+    "layout_analysis": {},
+    "current_slide_markdown": "",
+    "current_slide_struct": {},
+    "current_slide_preview_html": "",
+    "current_slide_snapshot": {},
+    "current_slide_id": None,
+    "current_parent_id": None,
+    "micro_tune_request": "",
+    "assembly_pages": [],
+    "history": [],
+    "active_history_id": None,
+    "generation_counter": 0,
+    "last_error": "",
+}
 
 DEFAULT_STATES = {
     "engine_mode": WRITING_PAGE,
@@ -613,6 +689,7 @@ DEFAULT_STATES = {
     "format_audited_docx_bytes": b"",
     "format_audited_docx_name": "",
     "viz_lab": deepcopy(VIZ_DEFAULT_STATE),
+    "ppt_lab": deepcopy(PPT_DEFAULT_STATE),
 }
 
 for key, default in DEFAULT_STATES.items():
@@ -685,6 +762,488 @@ def init_viz_state() -> dict:
     for key, default in VIZ_DEFAULT_STATE.items():
         current.setdefault(key, deepcopy(default))
     return current
+
+
+def init_ppt_state() -> dict:
+    current = st.session_state.get("ppt_lab")
+    if not isinstance(current, dict):
+        current = deepcopy(PPT_DEFAULT_STATE)
+        st.session_state["ppt_lab"] = current
+    for key, default in PPT_DEFAULT_STATE.items():
+        current.setdefault(key, deepcopy(default))
+    return current
+
+
+def detect_ppt_input_mode(ppt_state: dict) -> str:
+    if ppt_state.get("template_file_name"):
+        return "PPT模板"
+    if ppt_state.get("uploaded_source_name", "").lower().endswith(".pdf"):
+        return "PDF"
+    if ppt_state.get("uploaded_source_name", "").lower().endswith(".docx"):
+        return "Word"
+    if ppt_state.get("uploaded_source_text"):
+        return "文档"
+    if ppt_state.get("uploaded_images"):
+        return "图片"
+    return "纯文字"
+
+
+def collect_uploaded_images(uploaded_files) -> List[dict]:
+    images: List[dict] = []
+    for file in uploaded_files or []:
+        try:
+            file_bytes = file.getvalue()
+        except Exception:
+            file_bytes = file.read()
+        images.append({
+            "name": file.name,
+            "mime": getattr(file, "type", "image/png") or "image/png",
+            "bytes": file_bytes,
+        })
+    return images
+
+
+def analyze_ppt_template(template_bytes: bytes, filename: str) -> dict:
+    if not PPTX_AVAILABLE:
+        return {
+            "filename": filename,
+            "error": "当前环境未安装 python-pptx，暂时无法分析模板。",
+            "title_zone": "待分析",
+            "content_layout": "待分析",
+            "color_style": "待分析",
+            "font_hierarchy": "待分析",
+            "whitespace_style": "待分析",
+        }
+    try:
+        prs = Presentation(BytesIO(template_bytes))
+        width = round(prs.slide_width / 914400, 2)
+        height = round(prs.slide_height / 914400, 2)
+        sample_texts: List[str] = []
+        title_like = 0
+        text_like = 0
+        for slide in prs.slides[:3]:
+            for shape in slide.shapes:
+                text = getattr(shape, "text", "").strip()
+                if text:
+                    sample_texts.append(text[:60])
+                if getattr(shape, "has_text_frame", False):
+                    if shape.height and shape.height < Inches(1.2):
+                        title_like += 1
+                    else:
+                        text_like += 1
+        palette = "科研蓝灰" if any("blue" in t.lower() for t in sample_texts) else "模板原生配色"
+        return {
+            "filename": filename,
+            "slide_count": len(prs.slides),
+            "page_size": f"{width} × {height} in",
+            "title_zone": "上方标题区" if title_like >= text_like else "标题区不明显",
+            "content_layout": "图文混排" if text_like else "大图主导",
+            "color_style": palette,
+            "font_hierarchy": "存在标题/正文层级" if title_like else "层级需手动判断",
+            "whitespace_style": "中等留白",
+            "sample_texts": sample_texts[:5],
+            "has_slide_master": bool(getattr(prs, "slide_masters", [])),
+        }
+    except Exception as exc:
+        return {
+            "filename": filename,
+            "error": str(exc),
+            "title_zone": "待分析",
+            "content_layout": "待分析",
+            "color_style": "模板原生配色",
+            "font_hierarchy": "待分析",
+            "whitespace_style": "待分析",
+        }
+
+
+def normalize_ppt_input_sources(
+    source_file,
+    raw_text: str,
+    uploaded_images: List[dict],
+    reference_images: List[dict],
+    template_file,
+) -> dict:
+    source_name = ""
+    source_text = ""
+    if source_file is not None:
+        source_name = source_file.name
+        source_bytes = source_file.getvalue()
+        source_text = extract_text(source_bytes, source_name)
+    template_name = ""
+    template_analysis: dict = {}
+    if template_file is not None:
+        template_name = template_file.name
+        template_analysis = analyze_ppt_template(template_file.getvalue(), template_name)
+    return {
+        "uploaded_source_name": source_name,
+        "uploaded_source_text": source_text,
+        "raw_text": raw_text,
+        "uploaded_images": uploaded_images,
+        "reference_images": reference_images,
+        "template_file_name": template_name,
+        "template_analysis": template_analysis,
+        "input_mode": "纯文字",
+    }
+
+
+def build_ppt_page_context(ppt_state: dict) -> str:
+    text_source = (ppt_state.get("raw_text") or "").strip()
+    doc_source = (ppt_state.get("uploaded_source_text") or "").strip()
+    merged = text_source or doc_source
+    image_names = [item.get("name", "") for item in ppt_state.get("uploaded_images", [])]
+    ref_names = [item.get("name", "") for item in ppt_state.get("reference_images", [])]
+    return (
+        f"页面标题：{ppt_state.get('page_title') or '未命名当前页'}\n"
+        f"页面类型：{ppt_state.get('page_type', '结果页')}\n"
+        f"本页目标：{ppt_state.get('page_goal') or '未填写'}\n"
+        f"风格模式：{ppt_state.get('style_mode', 'academic-paperskills')}\n"
+        f"文字简化强度：{ppt_state.get('text_simplify_level', '中')}\n"
+        f"信息密度：{ppt_state.get('info_density', '中')}\n"
+        f"输入来源：{detect_ppt_input_mode(ppt_state)}\n"
+        f"原始文本：\n{merged[:6000]}\n\n"
+        f"补充说明：\n{(ppt_state.get('extra_notes') or '').strip()}\n\n"
+        f"上传图片：{', '.join(image_names) if image_names else '无'}\n"
+        f"参考图：{', '.join(ref_names) if ref_names else '无'}"
+    ).strip()
+
+
+def create_local_ppt_variants(ppt_state: dict) -> dict:
+    source = (ppt_state.get("raw_text") or ppt_state.get("uploaded_source_text") or "").strip()
+    page_title = (ppt_state.get("page_title") or "").strip()
+    if not source:
+        return {
+            "原文": "",
+            "精简版": "",
+            "标题版": page_title,
+            "要点版": "",
+            "结论先行版": "",
+        }
+    normalized = re.sub(r"\s+", " ", source).strip()
+    sentences = [item.strip(" -•·\t") for item in re.split(r"(?<=[。！？.!?])\s+|\n+", source) if item.strip()]
+    bullets = [f"- {item[:120].strip()}" for item in sentences[:5]]
+    headline_source = page_title or (sentences[0][:26] if sentences else normalized[:26])
+    conclusion = sentences[0] if sentences else normalized[:120]
+    compact = " ".join(sentences[:3])[:360] if sentences else normalized[:360]
+    return {
+        "原文": source[:4000],
+        "精简版": compact,
+        "标题版": headline_source,
+        "要点版": "\n".join(bullets),
+        "结论先行版": f"结论：{conclusion[:120]}\n支撑信息：{'；'.join(sentences[1:4])[:220]}",
+    }
+
+
+def generate_ppt_text_variants(ppt_state: dict) -> dict:
+    context = build_ppt_page_context(ppt_state)
+    if not context.strip():
+        return create_local_ppt_variants(ppt_state)
+    prompt = f"""
+你是科研汇报 PPT 单页工作台助手。只处理当前这一页，不要生成整套大纲。
+请基于下面内容，输出 JSON 对象，必须包含 5 个键：原文、精简版、标题版、要点版、结论先行版。
+要求：
+1. 保持科研汇报口吻，中文输出。
+2. 精简版适合放入单页 PPT。
+3. 标题版控制在 24 个字以内。
+4. 要点版写成 3-5 条短 bullet，每条单独一行，以“- ”开头。
+5. 只返回 JSON，不要加解释。
+
+当前页上下文：
+{context}
+""".strip()
+    try:
+        response = call_api(prompt, timeout=180)
+        match = re.search(r"\{[\s\S]*\}", response)
+        if match:
+            data = json.loads(match.group(0))
+            result = create_local_ppt_variants(ppt_state)
+            for key in result.keys():
+                value = data.get(key, result[key])
+                result[key] = value.strip() if isinstance(value, str) else result[key]
+            return result
+    except Exception:
+        pass
+    return create_local_ppt_variants(ppt_state)
+
+
+def resolve_ppt_layout(ppt_state: dict) -> dict:
+    selected = ppt_state.get("selected_layout") or PPT_PAGE_TYPE_LAYOUTS.get(ppt_state.get("page_type", "结果页"), "结果+结论")
+    layout = deepcopy(PPT_DEFAULT_LAYOUTS.get(selected, PPT_DEFAULT_LAYOUTS["结果+结论"]))
+    layout.update({
+        "name": selected,
+        "page_type": ppt_state.get("page_type", "结果页"),
+        "style_mode": ppt_state.get("style_mode", "academic-paperskills"),
+        "apply_template_layout": ppt_state.get("apply_template_layout", True),
+    })
+    return layout
+
+
+def choose_ppt_body_text(ppt_state: dict) -> str:
+    variants = ppt_state.get("processed_text_variants") or {}
+    density = ppt_state.get("info_density", "中")
+    if density == "低":
+        return variants.get("结论先行版") or variants.get("精简版") or variants.get("原文", "")
+    if density == "高":
+        return variants.get("原文") or variants.get("精简版", "")
+    return variants.get("要点版") or variants.get("精简版") or variants.get("原文", "")
+
+
+def build_ppt_slide_spec(ppt_state: dict) -> dict:
+    variants = ppt_state.get("processed_text_variants") or create_local_ppt_variants(ppt_state)
+    layout = resolve_ppt_layout(ppt_state)
+    title = (ppt_state.get("page_title") or variants.get("标题版") or "未命名单页").strip()
+    body_text = choose_ppt_body_text(ppt_state).strip()
+    tags = [
+        ppt_state.get("page_type", "结果页"),
+        layout.get("name", "结果+结论"),
+        ppt_state.get("style_mode", "academic-paperskills"),
+        detect_ppt_input_mode(ppt_state),
+        "补图开启" if ppt_state.get("generate_aux_figure") else "不补图",
+    ]
+    return {
+        "title": title,
+        "subtitle": ppt_state.get("page_goal", "").strip(),
+        "body": body_text,
+        "bullets": [line[2:].strip() for line in body_text.splitlines() if line.strip().startswith("- ")][:5],
+        "layout": layout,
+        "page_type": ppt_state.get("page_type", "结果页"),
+        "style_mode": ppt_state.get("style_mode", "academic-paperskills"),
+        "template_analysis": deepcopy(ppt_state.get("template_analysis") or {}),
+        "template_name": ppt_state.get("template_file_name") or ppt_state.get("template_name") or "默认科研模板",
+        "input_mode": detect_ppt_input_mode(ppt_state),
+        "tags": tags,
+        "aux_figure_prompt": "",
+        "aux_figure_url": "",
+        "aux_figure_bytes": b"",
+        "notes": (ppt_state.get("extra_notes") or "").strip(),
+        "source_images": deepcopy(ppt_state.get("uploaded_images") or []),
+        "reference_images": deepcopy(ppt_state.get("reference_images") or []),
+    }
+
+
+def build_ppt_micro_tune_prompt(ppt_state: dict) -> str:
+    spec = ppt_state.get("current_slide_struct") or {}
+    return (
+        f"当前页标题：{spec.get('title', '')}\n"
+        f"当前布局：{(spec.get('layout') or {}).get('name', '')}\n"
+        f"当前文案：\n{spec.get('body', '')}\n\n"
+        f"用户微调要求：\n{ppt_state.get('micro_tune_request', '').strip()}"
+    ).strip()
+
+
+def generate_ppt_aux_figure(ppt_state: dict, spec: dict) -> dict:
+    prompt = (
+        f"Create a scientific presentation figure for a single PPT page. "
+        f"Page type: {ppt_state.get('page_type', '结果页')}. "
+        f"Layout: {(spec.get('layout') or {}).get('name', '结果+结论')}. "
+        f"Theme: {spec.get('title', '')}. "
+        f"Body: {spec.get('body', '')[:600]}. "
+        f"Style: clean academic, blue-white-gray, high readability, presentation-ready."
+    )
+    try:
+        image_url, image_bytes = call_gemini_image(prompt, aspect_ratio="16:9")
+        return {
+            "aux_figure_prompt": prompt,
+            "aux_figure_url": image_url,
+            "aux_figure_bytes": image_bytes,
+            "error": "",
+        }
+    except Exception as exc:
+        return {
+            "aux_figure_prompt": prompt,
+            "aux_figure_url": "",
+            "aux_figure_bytes": b"",
+            "error": str(exc),
+        }
+
+
+def render_ppt_slide_preview(spec: dict) -> str:
+    body_html = "".join(f"<li>{escape(item)}</li>" for item in spec.get("bullets") or [])
+    if not body_html:
+        body_html = f"<p>{escape(spec.get('body', '')).replace(chr(10), '<br>')}</p>"
+    tags_html = "".join(f"<span class='workbench-chip'>{escape(tag)}</span>" for tag in spec.get("tags", []))
+    aux_html = ""
+    if spec.get("aux_figure_url"):
+        aux_html = f"<img src='{spec['aux_figure_url']}' style='width:100%; border-radius:14px; border:1px solid #dbe7f5; object-fit:cover;'/>"
+    elif spec.get("source_images"):
+        aux_html = f"<div style='padding:1rem;border:1px dashed #93c5fd;border-radius:14px;background:#eff6ff;color:#1e40af;'>已载入图片素材：{escape(spec['source_images'][0].get('name', 'image'))}</div>"
+    else:
+        aux_html = "<div style='padding:1rem;border:1px dashed #cbd5e1;border-radius:14px;background:#f8fafc;color:#475569;'>图片区占位：可上传原图 / 参考图 / 生成辅助图</div>"
+    return f"""
+    <div style="background:linear-gradient(180deg,#ffffff 0%,#f8fbff 100%);border:1px solid #dbe7f5;border-radius:18px;padding:1rem;box-shadow:0 10px 30px rgba(15,23,42,0.06);">
+        <div style="display:flex;justify-content:space-between;gap:1rem;align-items:flex-start;margin-bottom:0.7rem;">
+            <div>
+                <div style="font-size:1.45rem;font-weight:700;color:#0f172a;line-height:1.25;">{escape(spec.get('title', '未命名单页'))}</div>
+                <div style="font-size:0.92rem;color:#475569;margin-top:0.25rem;">{escape(spec.get('subtitle', ''))}</div>
+            </div>
+            <div style="display:flex;gap:0.35rem;flex-wrap:wrap;justify-content:flex-end;">{tags_html}</div>
+        </div>
+        <div style="display:grid;grid-template-columns:1.1fr 0.9fr;gap:1rem;align-items:start;">
+            <div style="background:#ffffff;border-radius:14px;padding:0.9rem;border:1px solid #e2e8f0;color:#0f172a;min-height:260px;">
+                <ul style="margin:0;padding-left:1.1rem;line-height:1.7;color:#334155;">{body_html}</ul>
+            </div>
+            <div>{aux_html}</div>
+        </div>
+    </div>
+    """.strip()
+
+
+def append_ppt_history_entry(ppt_state: dict) -> None:
+    spec = deepcopy(ppt_state.get("current_slide_struct") or {})
+    if not spec:
+        return
+    entry_id = ppt_state.get("current_slide_id") or f"ppt-{ppt_state.get('generation_counter', 0)}"
+    entry = {
+        "id": entry_id,
+        "parent_id": ppt_state.get("current_parent_id"),
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "page_title": ppt_state.get("page_title", ""),
+        "page_type": ppt_state.get("page_type", "结果页"),
+        "page_goal": ppt_state.get("page_goal", ""),
+        "raw_text": ppt_state.get("raw_text", ""),
+        "extra_notes": ppt_state.get("extra_notes", ""),
+        "uploaded_source_name": ppt_state.get("uploaded_source_name", ""),
+        "uploaded_source_text": ppt_state.get("uploaded_source_text", ""),
+        "uploaded_images": deepcopy(ppt_state.get("uploaded_images", [])),
+        "reference_images": deepcopy(ppt_state.get("reference_images", [])),
+        "template_name": ppt_state.get("template_name", "默认科研模板"),
+        "template_analysis": deepcopy(ppt_state.get("template_analysis", {})),
+        "template_file_name": ppt_state.get("template_file_name", ""),
+        "style_mode": ppt_state.get("style_mode", "academic-paperskills"),
+        "text_simplify_level": ppt_state.get("text_simplify_level", "中"),
+        "info_density": ppt_state.get("info_density", "中"),
+        "keep_original_images": ppt_state.get("keep_original_images", True),
+        "allow_external_support": ppt_state.get("allow_external_support", False),
+        "generate_aux_figure": ppt_state.get("generate_aux_figure", False),
+        "apply_template_layout": ppt_state.get("apply_template_layout", True),
+        "processed_text_variants": deepcopy(ppt_state.get("processed_text_variants", {})),
+        "selected_layout": ppt_state.get("selected_layout", "结果+结论"),
+        "layout_analysis": deepcopy(ppt_state.get("layout_analysis", {})),
+        "current_slide_markdown": ppt_state.get("current_slide_markdown", ""),
+        "current_slide_struct": spec,
+        "current_slide_preview_html": ppt_state.get("current_slide_preview_html", ""),
+        "current_slide_snapshot": deepcopy(ppt_state.get("current_slide_snapshot", {})),
+        "micro_tune_request": ppt_state.get("micro_tune_request", ""),
+    }
+    ppt_state["history"] = [item for item in ppt_state.get("history", []) if item.get("id") != entry_id]
+    ppt_state["history"].insert(0, entry)
+    ppt_state["history"] = ppt_state["history"][:30]
+    ppt_state["active_history_id"] = entry_id
+
+
+def restore_ppt_history_entry(ppt_state: dict, entry_id: str) -> None:
+    for entry in ppt_state.get("history", []):
+        if entry.get("id") != entry_id:
+            continue
+        for key in PPT_DEFAULT_STATE.keys():
+            if key in ["assembly_pages", "history", "active_history_id", "generation_counter", "last_error"]:
+                continue
+            ppt_state[key] = deepcopy(entry.get(key, PPT_DEFAULT_STATE.get(key)))
+        ppt_state["current_slide_id"] = entry.get("id")
+        ppt_state["current_parent_id"] = entry.get("parent_id")
+        ppt_state["active_history_id"] = entry.get("id")
+        return
+
+
+def add_current_slide_to_assembly(ppt_state: dict) -> None:
+    spec = deepcopy(ppt_state.get("current_slide_struct") or {})
+    if not spec:
+        return
+    slide_id = ppt_state.get("current_slide_id") or f"ppt-{ppt_state.get('generation_counter', 0)}"
+    assembly_entry = {
+        "id": slide_id,
+        "page_title": spec.get("title", "未命名单页"),
+        "page_type": spec.get("page_type", ppt_state.get("page_type", "结果页")),
+        "layout_name": (spec.get("layout") or {}).get("name", ppt_state.get("selected_layout", "结果+结论")),
+        "preview_html": ppt_state.get("current_slide_preview_html", ""),
+        "slide_struct": spec,
+        "markdown": ppt_state.get("current_slide_markdown", ""),
+        "snapshot": deepcopy(ppt_state.get("current_slide_snapshot", {})),
+    }
+    ppt_state["assembly_pages"].append(assembly_entry)
+
+
+def duplicate_assembly_slide(ppt_state: dict, slide_id: str) -> None:
+    for index, slide in enumerate(ppt_state.get("assembly_pages", [])):
+        if slide.get("id") != slide_id:
+            continue
+        duplicated = deepcopy(slide)
+        duplicated["id"] = f"{slide_id}-copy-{len(ppt_state['assembly_pages']) + 1}"
+        duplicated["page_title"] = f"{slide.get('page_title', '页面')}（副本）"
+        ppt_state["assembly_pages"].insert(index + 1, duplicated)
+        return
+
+
+def remove_assembly_slide(ppt_state: dict, slide_id: str) -> None:
+    ppt_state["assembly_pages"] = [slide for slide in ppt_state.get("assembly_pages", []) if slide.get("id") != slide_id]
+
+
+def move_assembly_slide(ppt_state: dict, slide_id: str, direction: int) -> None:
+    slides = ppt_state.get("assembly_pages", [])
+    for index, slide in enumerate(slides):
+        if slide.get("id") != slide_id:
+            continue
+        new_index = index + direction
+        if 0 <= new_index < len(slides):
+            slides[index], slides[new_index] = slides[new_index], slides[index]
+        return
+
+
+def export_pptx_deck(ppt_state: dict) -> bytes:
+    if not PPTX_AVAILABLE:
+        raise RuntimeError("当前环境未安装 python-pptx，暂时无法导出 PPTX。请先安装 requirements.txt 里的依赖。")
+    prs = Presentation()
+    for slide_info in ppt_state.get("assembly_pages", []):
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        spec = slide_info.get("slide_struct") or {}
+        title_box = slide.shapes.add_textbox(Inches(0.55), Inches(0.4), Inches(8.2), Inches(0.9))
+        title_tf = title_box.text_frame
+        title_tf.word_wrap = True
+        title_p = title_tf.paragraphs[0]
+        title_p.text = spec.get("title", slide_info.get("page_title", "未命名单页"))
+        title_p.font.size = PptxPt(26)
+        title_p.font.bold = True
+
+        sub_box = slide.shapes.add_textbox(Inches(0.6), Inches(1.15), Inches(7.8), Inches(0.55))
+        sub_tf = sub_box.text_frame
+        sub_tf.paragraphs[0].text = spec.get("subtitle", "")
+        sub_tf.paragraphs[0].font.size = PptxPt(12)
+
+        body_box = slide.shapes.add_textbox(Inches(0.7), Inches(1.8), Inches(5.0), Inches(4.8))
+        body_tf = body_box.text_frame
+        body_tf.word_wrap = True
+        bullets = spec.get("bullets") or []
+        if bullets:
+            first = body_tf.paragraphs[0]
+            first.text = bullets[0]
+            first.font.size = PptxPt(18)
+            for item in bullets[1:5]:
+                p = body_tf.add_paragraph()
+                p.text = item
+                p.font.size = PptxPt(18)
+                p.level = 0
+        else:
+            body_tf.paragraphs[0].text = spec.get("body", "")[:900]
+            body_tf.paragraphs[0].font.size = PptxPt(16)
+
+        if spec.get("aux_figure_bytes"):
+            slide.shapes.add_picture(BytesIO(spec["aux_figure_bytes"]), Inches(6.0), Inches(1.7), width=Inches(3.1), height=Inches(3.8))
+        else:
+            shape = slide.shapes.add_shape(MSO_AUTO_SHAPE_TYPE.ROUNDED_RECTANGLE, Inches(6.0), Inches(1.7), Inches(3.1), Inches(3.8))
+            shape.text_frame.text = "图像区\n上传原图 / 参考图 / 辅助图"
+            shape.fill.solid()
+            shape.fill.fore_color.rgb = RGBColor(239, 246, 255)
+            shape.line.color.rgb = RGBColor(147, 197, 253)
+
+        footer_box = slide.shapes.add_textbox(Inches(0.65), Inches(6.8), Inches(8.2), Inches(0.3))
+        footer_tf = footer_box.text_frame
+        footer_tf.paragraphs[0].text = f"{slide_info.get('page_type', '结果页')} · {slide_info.get('layout_name', '结果+结论')}"
+        footer_tf.paragraphs[0].font.size = PptxPt(10)
+    if not prs.slides:
+        prs.slides.add_slide(prs.slide_layouts[6])
+    buffer = BytesIO()
+    prs.save(buffer)
+    buffer.seek(0)
+    return buffer.read()
 
 
 def parse_tag_text(raw_text: str) -> List[str]:
@@ -1802,7 +2361,7 @@ def render_header() -> None:
         """
 <div class="main-header">
     <h1>学研 · Xueyan Workstation</h1>
-    <p>双引擎科研工作台 · 写作协作与确定性排版在同一界面内完成</p>
+    <p>四引擎科研工作台 · 写作、排版、绘图与单页 PPT 在同一界面内协同完成</p>
 </div>
 """,
         unsafe_allow_html=True,
@@ -2012,7 +2571,7 @@ def get_function_nav_index(current_function: str) -> int:
 
 def render_writing_engine_sidebar() -> List[str]:
     render_sidebar_brand()
-    st.sidebar.radio("核心引擎", [WRITING_PAGE, FORMATTING_PAGE, VIZ_PAGE], key="engine_mode")
+    st.sidebar.radio("核心引擎", [WRITING_PAGE, FORMATTING_PAGE, VIZ_PAGE, PPT_PAGE], key="engine_mode")
     st.sidebar.selectbox("统一功能栏", options=FUNCTION_NAV, index=get_function_nav_index(st.session_state.get("writing_function", list(FUNCTION_MATRIX.keys())[0])), format_func=lambda item: item["label"], key="writing_function_selector")
     st.session_state.writing_function = st.session_state["writing_function_selector"]["value"]
     st.sidebar.selectbox("🔬 学科大脑", DOMAIN_ORDER, key="writing_domain_selector")
@@ -2149,7 +2708,7 @@ def render_history_panel() -> None:
 
 def render_formatting_engine_sidebar() -> None:
     render_sidebar_brand()
-    st.sidebar.radio("核心引擎", [WRITING_PAGE, FORMATTING_PAGE, VIZ_PAGE], key="engine_mode")
+    st.sidebar.radio("核心引擎", [WRITING_PAGE, FORMATTING_PAGE, VIZ_PAGE, PPT_PAGE], key="engine_mode")
     st.sidebar.selectbox("🔬 学科大脑", DOMAIN_ORDER, key="format_formatting_domain_selector")
     st.session_state.formatting_domain = st.session_state["format_formatting_domain_selector"]
     st.sidebar.selectbox(
@@ -2166,7 +2725,7 @@ def render_viz_engine_sidebar() -> None:
     viz_state = init_viz_state()
     viz_state["logic_summary"] = build_viz_logic_summary(viz_state)
     render_sidebar_brand()
-    st.sidebar.radio("核心引擎", [WRITING_PAGE, FORMATTING_PAGE, VIZ_PAGE], key="engine_mode")
+    st.sidebar.radio("核心引擎", [WRITING_PAGE, FORMATTING_PAGE, VIZ_PAGE, PPT_PAGE], key="engine_mode")
     render_sidebar_panel("视觉实验室", "材料科研单图生成、精修与版本迭代全部收敛到 viz_lab 命名空间。")
     st.sidebar.caption(f"绘图模型：{GEMINI_MODEL}")
     st.sidebar.caption("Claude 本地负责逻辑与代码，Gemini 仅负责图像生成。")
@@ -2201,6 +2760,51 @@ def render_viz_history_panel(viz_state: dict) -> None:
                         key=f"viz_hist_dl_{entry['id']}",
                         use_container_width=True,
                     )
+
+
+def render_ppt_engine_sidebar() -> None:
+    ppt_state = init_ppt_state()
+    render_sidebar_brand()
+    st.sidebar.radio("核心引擎", [WRITING_PAGE, FORMATTING_PAGE, VIZ_PAGE, PPT_PAGE], key="engine_mode")
+    render_sidebar_panel("PPT大师", "面向科研汇报的单页式 PPT 工作台：提炼当前页、排版当前页、逐页加入 PPT。")
+    st.sidebar.caption(f"文本模型：{CLAUDE_MODEL}")
+    st.sidebar.caption(f"辅助图模型：{GEMINI_MODEL}")
+    st.sidebar.caption("当前页摘要")
+    summary = (
+        f"标题：{ppt_state.get('page_title') or '未命名'}\n"
+        f"类型：{ppt_state.get('page_type', '结果页')}\n"
+        f"布局：{ppt_state.get('selected_layout') or PPT_PAGE_TYPE_LAYOUTS.get(ppt_state.get('page_type', '结果页'), '结果+结论')}\n"
+        f"输入：{detect_ppt_input_mode(ppt_state)}\n"
+        f"组装页数：{len(ppt_state.get('assembly_pages', []))}"
+    )
+    st.sidebar.code(summary, language=None)
+
+
+def render_ppt_history_panel(ppt_state: dict) -> None:
+    if not ppt_state.get("history"):
+        st.info("📭 暂无当前页历史")
+        return
+    for entry in ppt_state["history"]:
+        title = f"{entry['timestamp']} · {entry.get('page_type', '结果页')} · {entry.get('page_title') or '未命名'}"
+        with st.expander(title, expanded=False):
+            st.caption(f"链路: {entry.get('parent_id') or 'ROOT'} → {entry['id']}")
+            st.caption(f"布局：{entry.get('selected_layout', '结果+结论')} | 风格：{entry.get('style_mode', 'academic-paperskills')}")
+            if entry.get("current_slide_preview_html"):
+                components.html(entry["current_slide_preview_html"], height=360)
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("📥 恢复当前页", key=f"ppt_restore_{entry['id']}", use_container_width=True):
+                    restore_ppt_history_entry(ppt_state, entry["id"])
+                    st.rerun()
+            with c2:
+                st.download_button(
+                    "⬇️ 下载 JSON",
+                    data=json.dumps(entry.get("current_slide_struct") or {}, ensure_ascii=False, indent=2).encode("utf-8"),
+                    file_name=f"xueyan_ppt_{entry['id']}.json",
+                    mime="application/json",
+                    key=f"ppt_hist_dl_{entry['id']}",
+                    use_container_width=True,
+                )
 
 
 def render_viz_engine() -> None:
@@ -2427,6 +3031,285 @@ def render_viz_engine() -> None:
             render_viz_history_panel(viz_state)
 
 
+def render_ppt_engine() -> None:
+    ppt_state = init_ppt_state()
+    render_ppt_engine_sidebar()
+
+    st.markdown(
+        """
+<div class="workbench-card compact">
+    <div class="workbench-title">
+        <div>
+            <h3>PPT大师工作台</h3>
+            <p>围绕当前这一页完成输入提炼、模板排版、预览微调与逐页组装。</p>
+        </div>
+        <span class="workbench-chip">Single-page PPT</span>
+    </div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
+    panel1, panel2, panel3 = st.columns([1.05, 1.25, 0.95], gap="large")
+
+    with panel1:
+        st.markdown("### Panel 1 · 输入与任务配置")
+        with st.expander("① 输入来源", expanded=True):
+            source_file = st.file_uploader("上传 PDF / Word", type=["pdf", "docx"], key="ppt_source_file")
+            ppt_state["raw_text"] = st.text_area(
+                "输入文字",
+                value=ppt_state.get("raw_text", ""),
+                height=180,
+                placeholder="把当前页相关的文字、论文摘要、实验结果描述、老师意见放这里。",
+                key="ppt_raw_text",
+            )
+            uploaded_images_files = st.file_uploader("上传图片", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key="ppt_uploaded_images")
+            reference_image_files = st.file_uploader("上传参考图", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key="ppt_reference_images")
+            template_file = st.file_uploader("上传 PPT 模板", type=["pptx"], key="ppt_template_file")
+
+            normalized = normalize_ppt_input_sources(
+                source_file,
+                ppt_state.get("raw_text", ""),
+                collect_uploaded_images(uploaded_images_files),
+                collect_uploaded_images(reference_image_files),
+                template_file,
+            )
+            for key, value in normalized.items():
+                ppt_state[key] = value
+            ppt_state["input_mode"] = detect_ppt_input_mode(ppt_state)
+            if template_file is not None:
+                ppt_state["template_name"] = template_file.name
+
+        with st.expander("② 当前页基础信息", expanded=True):
+            ppt_state["page_title"] = st.text_input("当前页标题", value=ppt_state.get("page_title", ""), key="ppt_page_title")
+            ppt_state["page_type"] = st.selectbox(
+                "页面类型",
+                PPT_PAGE_TYPES,
+                index=PPT_PAGE_TYPES.index(ppt_state.get("page_type", "结果页")) if ppt_state.get("page_type", "结果页") in PPT_PAGE_TYPES else 5,
+                key="ppt_page_type",
+            )
+            ppt_state["page_goal"] = st.text_area("本页目标", value=ppt_state.get("page_goal", ""), height=90, key="ppt_page_goal")
+
+        with st.expander("③ 原始内容与补充说明", expanded=True):
+            ppt_state["extra_notes"] = st.text_area(
+                "补充说明",
+                value=ppt_state.get("extra_notes", ""),
+                height=110,
+                placeholder="例如：这一页重点突出实验趋势，不要写太满；保留原图；结论要先出现在右上角。",
+                key="ppt_extra_notes",
+            )
+            st.caption(f"已载入图片素材：{len(ppt_state.get('uploaded_images', []))} 张 | 参考图：{len(ppt_state.get('reference_images', []))} 张")
+            if ppt_state.get("uploaded_source_name"):
+                st.caption(f"文档来源：{ppt_state['uploaded_source_name']}")
+
+        with st.expander("④ 生成控制项", expanded=True):
+            c1, c2 = st.columns(2)
+            with c1:
+                ppt_state["text_simplify_level"] = st.selectbox("文字简化强度", ["低", "中", "高"], index=["低", "中", "高"].index(ppt_state.get("text_simplify_level", "中")), key="ppt_text_simplify_level")
+                ppt_state["keep_original_images"] = st.checkbox("保留原图", value=ppt_state.get("keep_original_images", True), key="ppt_keep_original_images")
+                ppt_state["generate_aux_figure"] = st.checkbox("生成辅助图", value=ppt_state.get("generate_aux_figure", False), key="ppt_generate_aux_figure")
+            with c2:
+                ppt_state["info_density"] = st.selectbox("信息密度", ["低", "中", "高"], index=["低", "中", "高"].index(ppt_state.get("info_density", "中")), key="ppt_info_density")
+                ppt_state["allow_external_support"] = st.checkbox("补充资料", value=ppt_state.get("allow_external_support", False), key="ppt_allow_external_support")
+                ppt_state["apply_template_layout"] = st.checkbox("按模板排版", value=ppt_state.get("apply_template_layout", True), key="ppt_apply_template_layout")
+            ppt_state["style_mode"] = st.selectbox(
+                "风格模式",
+                PPT_STYLE_MODES,
+                index=PPT_STYLE_MODES.index(ppt_state.get("style_mode", "academic-paperskills")) if ppt_state.get("style_mode", "academic-paperskills") in PPT_STYLE_MODES else 0,
+                key="ppt_style_mode",
+            )
+
+    with panel2:
+        st.markdown("### Panel 2 · 当前页处理与生成")
+        variants = ppt_state.get("processed_text_variants") or create_local_ppt_variants(ppt_state)
+        tabs = st.tabs(["原文", "精简版", "标题版", "要点版", "结论先行版"])
+        variant_keys = ["原文", "精简版", "标题版", "要点版", "结论先行版"]
+        for tab, key in zip(tabs, variant_keys):
+            with tab:
+                st.text_area(key, value=variants.get(key, ""), height=150, disabled=True, key=f"ppt_variant_preview_{key}")
+
+        with st.expander("模板适配区", expanded=True):
+            if ppt_state.get("template_analysis"):
+                analysis = ppt_state["template_analysis"]
+                st.markdown(f"**模板**：{analysis.get('filename', ppt_state.get('template_file_name', 'PPT模板'))}")
+                if analysis.get("error"):
+                    st.warning(f"模板分析失败：{analysis['error']}")
+                else:
+                    st.markdown(f"- 标题区位置：{analysis.get('title_zone', '待分析')}")
+                    st.markdown(f"- 图文区布局：{analysis.get('content_layout', '待分析')}")
+                    st.markdown(f"- 配色风格：{analysis.get('color_style', '待分析')}")
+                    st.markdown(f"- 字体层级：{analysis.get('font_hierarchy', '待分析')}")
+                    st.markdown(f"- 留白风格：{analysis.get('whitespace_style', '待分析')}")
+            else:
+                st.info("未上传模板，自动回退到默认科研页版式。")
+            layout_names = list(PPT_DEFAULT_LAYOUTS.keys())
+            default_layout = PPT_PAGE_TYPE_LAYOUTS.get(ppt_state.get("page_type", "结果页"), "结果+结论")
+            current_layout = ppt_state.get("selected_layout") or default_layout
+            ppt_state["selected_layout"] = st.selectbox(
+                "当前页布局",
+                layout_names,
+                index=layout_names.index(current_layout) if current_layout in layout_names else layout_names.index(default_layout),
+                format_func=lambda key: f"{key}｜{PPT_DEFAULT_LAYOUTS[key]['hint']}",
+                key="ppt_selected_layout",
+            )
+            ppt_state["layout_analysis"] = resolve_ppt_layout(ppt_state)
+
+        action1, action2, action3 = st.columns([1, 1, 1])
+        with action1:
+            generate_slide_clicked = st.button("生成当前页", type="primary", use_container_width=True, key="ppt_generate_slide")
+        with action2:
+            regenerate_slide_clicked = st.button("重新生成当前页", use_container_width=True, key="ppt_regenerate_slide")
+        with action3:
+            add_to_ppt_clicked = st.button("加入 PPT", use_container_width=True, key="ppt_add_to_assembly")
+
+        if generate_slide_clicked or regenerate_slide_clicked:
+            content_exists = any([
+                (ppt_state.get("raw_text") or "").strip(),
+                (ppt_state.get("uploaded_source_text") or "").strip(),
+                ppt_state.get("uploaded_images"),
+                ppt_state.get("reference_images"),
+            ])
+            if not content_exists:
+                st.warning("请先输入当前页素材。")
+            else:
+                ppt_state["generation_counter"] += 1
+                ppt_state["current_parent_id"] = None if generate_slide_clicked else ppt_state.get("current_slide_id")
+                with st.spinner("正在提炼当前页内容..."):
+                    ppt_state["processed_text_variants"] = generate_ppt_text_variants(ppt_state)
+                    spec = build_ppt_slide_spec(ppt_state)
+                    if ppt_state.get("generate_aux_figure") and GEMINI_API_KEY:
+                        aux_result = generate_ppt_aux_figure(ppt_state, spec)
+                        if aux_result.get("error"):
+                            ppt_state["last_error"] = aux_result["error"]
+                        else:
+                            spec.update(aux_result)
+                            ppt_state["last_error"] = ""
+                    ppt_state["current_slide_struct"] = spec
+                    ppt_state["current_slide_markdown"] = f"# {spec['title']}\n\n{spec.get('body', '')}"
+                    ppt_state["current_slide_preview_html"] = render_ppt_slide_preview(spec)
+                    ppt_state["current_slide_snapshot"] = deepcopy(spec)
+                    ppt_state["current_slide_id"] = f"ppt-{ppt_state['generation_counter']}"
+                    append_ppt_history_entry(ppt_state)
+
+        st.markdown("### 当前页预览")
+        if ppt_state.get("current_slide_preview_html"):
+            components.html(ppt_state["current_slide_preview_html"], height=420)
+            st.caption("标签：" + " / ".join((ppt_state.get("current_slide_struct") or {}).get("tags", [])))
+        else:
+            st.info("尚未生成当前页。先在左侧输入素材，再点“生成当前页”。")
+
+        ppt_state["micro_tune_request"] = st.text_area(
+            "微调当前页",
+            value=ppt_state.get("micro_tune_request", ""),
+            height=90,
+            placeholder="例如：标题更学术化；要点减到 3 条；把结论提前；图片区更突出。",
+            key="ppt_micro_tune_request",
+        )
+        tune1, tune2, tune3 = st.columns(3)
+        with tune1:
+            micro_tune_clicked = st.button("微调当前页", use_container_width=True, key="ppt_micro_tune")
+        with tune2:
+            copy_slide_clicked = st.button("复制当前页文案", use_container_width=True, key="ppt_copy_slide")
+        with tune3:
+            download_slide_ready = bool(ppt_state.get("current_slide_struct"))
+            if download_slide_ready:
+                st.download_button(
+                    "下载当前页",
+                    data=json.dumps(ppt_state.get("current_slide_struct") or {}, ensure_ascii=False, indent=2).encode("utf-8"),
+                    file_name=build_export_filename("xueyan_ppt_slide", ppt_state.get("page_title") or "current-slide", suffix=".json"),
+                    mime="application/json",
+                    use_container_width=True,
+                    key="ppt_download_slide_json",
+                )
+
+        if micro_tune_clicked:
+            if not ppt_state.get("current_slide_struct"):
+                st.warning("请先生成当前页。")
+            elif not ppt_state.get("micro_tune_request", "").strip():
+                st.warning("请先输入微调要求。")
+            else:
+                ppt_state["generation_counter"] += 1
+                ppt_state["current_parent_id"] = ppt_state.get("current_slide_id")
+                prompt = build_ppt_micro_tune_prompt(ppt_state)
+                variants = deepcopy(ppt_state.get("processed_text_variants") or {})
+                variants["精简版"] = (variants.get("精简版") or choose_ppt_body_text(ppt_state)) + f"\n\n微调要求：{ppt_state['micro_tune_request']}"
+                ppt_state["processed_text_variants"] = variants
+                spec = build_ppt_slide_spec(ppt_state)
+                spec["notes"] = prompt
+                if ppt_state.get("current_slide_struct", {}).get("aux_figure_url"):
+                    spec["aux_figure_url"] = ppt_state["current_slide_struct"].get("aux_figure_url", "")
+                    spec["aux_figure_bytes"] = ppt_state["current_slide_struct"].get("aux_figure_bytes", b"")
+                ppt_state["current_slide_struct"] = spec
+                ppt_state["current_slide_markdown"] = f"# {spec['title']}\n\n{spec.get('body', '')}"
+                ppt_state["current_slide_preview_html"] = render_ppt_slide_preview(spec)
+                ppt_state["current_slide_snapshot"] = deepcopy(spec)
+                ppt_state["current_slide_id"] = f"ppt-{ppt_state['generation_counter']}"
+                append_ppt_history_entry(ppt_state)
+
+        if copy_slide_clicked and ppt_state.get("current_slide_markdown"):
+            render_copy_text(ppt_state["current_slide_markdown"], "ppt_copy_current_slide_btn")
+            st.button("📋 复制当前页文案", key="ppt_copy_current_slide_btn", use_container_width=True)
+
+        if add_to_ppt_clicked:
+            if not ppt_state.get("current_slide_struct"):
+                st.warning("请先生成当前页。")
+            else:
+                add_current_slide_to_assembly(ppt_state)
+                st.success("已加入 PPT 组装区。")
+
+        with st.expander("当前页历史", expanded=False):
+            render_ppt_history_panel(ppt_state)
+
+    with panel3:
+        st.markdown("### Panel 3 · 输出与 PPT 组装")
+        assembly_pages = ppt_state.get("assembly_pages", [])
+        st.metric("已加入页数", len(assembly_pages))
+        if ppt_state.get("current_slide_id"):
+            st.caption(f"当前页编号：{ppt_state['current_slide_id']}")
+        if not assembly_pages:
+            st.info("当前还没有加入 PPT 的页面。")
+        for idx, slide in enumerate(assembly_pages, start=1):
+            title = slide.get("page_title") or f"页面 {idx}"
+            with st.expander(f"{idx}. {title}", expanded=False):
+                new_title = st.text_input("页面重命名", value=title, key=f"ppt_assembly_title_{slide['id']}")
+                slide["page_title"] = new_title
+                st.caption(f"类型：{slide.get('page_type', '结果页')} | 布局：{slide.get('layout_name', '结果+结论')}")
+                if slide.get("preview_html"):
+                    components.html(slide["preview_html"], height=260)
+                c1, c2 = st.columns(2)
+                with c1:
+                    if st.button("上移", key=f"ppt_move_up_{slide['id']}", use_container_width=True):
+                        move_assembly_slide(ppt_state, slide["id"], -1)
+                        st.rerun()
+                with c2:
+                    if st.button("下移", key=f"ppt_move_down_{slide['id']}", use_container_width=True):
+                        move_assembly_slide(ppt_state, slide["id"], 1)
+                        st.rerun()
+                c3, c4 = st.columns(2)
+                with c3:
+                    if st.button("复制页面", key=f"ppt_dup_{slide['id']}", use_container_width=True):
+                        duplicate_assembly_slide(ppt_state, slide["id"])
+                        st.rerun()
+                with c4:
+                    if st.button("删除页面", key=f"ppt_del_{slide['id']}", use_container_width=True):
+                        remove_assembly_slide(ppt_state, slide["id"])
+                        st.rerun()
+
+        if assembly_pages:
+            if PPTX_AVAILABLE:
+                deck_bytes = export_pptx_deck(ppt_state)
+                st.download_button(
+                    "导出 PPTX",
+                    data=deck_bytes,
+                    file_name=build_export_filename("xueyan_ppt_deck", ppt_state.get("page_title") or "research-deck", suffix=".pptx"),
+                    mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                    use_container_width=True,
+                    key="ppt_export_deck",
+                )
+            else:
+                st.warning("当前环境缺少 python-pptx，暂时不能导出 PPTX。先安装 requirements.txt 依赖后即可使用。")
+
+
 def render_formatting_engine() -> None:
     render_formatting_engine_sidebar()
     domain = st.session_state.get("formatting_domain", DOMAIN_ORDER[0])
@@ -2621,15 +3504,17 @@ def main() -> None:
         render_writing_engine()
     elif st.session_state.engine_mode == FORMATTING_PAGE:
         render_formatting_engine()
-    else:
+    elif st.session_state.engine_mode == VIZ_PAGE:
         render_viz_engine()
+    else:
+        render_ppt_engine()
 
     st.markdown(
         """
 ---
 <div style="text-align: center; color: #64748b; font-size: 0.8rem; padding: 2rem 0;">
     <p><strong>🧪 学研·工科科研助手 v4.0</strong></p>
-    <p>三引擎架构 · 写作协作 OS · 确定性格式对齐 · 视觉实验室</p>
+    <p>四引擎架构 · 写作协作 OS · 确定性格式对齐 · 视觉实验室 · PPT大师</p>
 </div>
 """,
         unsafe_allow_html=True,
