@@ -197,9 +197,6 @@ def load_local_skills() -> Dict[str, str]:
     return skills
 
 LOCAL_SKILLS = load_local_skills()
-SKILL_GROUPS = {
-    "humanizer": HUMANIZER_RULES if "HUMANIZER_RULES" in globals() else "",
-}
 
 HUMANIZER_RULES = """
 ## Humanizer 核心规则（零篡位）
@@ -255,11 +252,16 @@ def writing_note_key(section: str) -> str:
     return f"writing_note_{section}"
 
 
+def writing_term_count_key(section: str) -> str:
+    return f"writing_term_count_{section}"
+
+
 def init_writing_state() -> None:
     for section in SECTION_NAMES:
         st.session_state.setdefault(writing_input_key(section), "")
         st.session_state.setdefault(writing_output_key(section), "")
         st.session_state.setdefault(writing_note_key(section), "")
+        st.session_state.setdefault(writing_term_count_key(section), 0)
 
 
 def append_skill_preview() -> Dict[str, str]:
@@ -749,12 +751,14 @@ def create_format_audit_summary(audit_report: Dict) -> str:
 def build_format_audit_table(audit_report: Dict) -> str:
     issues = audit_report.get("issues", [])
     if not issues:
-        return "| 检查项 | 状态 | 改进建议 |\n| --- | --- | --- |\n| 格式审计 | ✅ 通过 | 未发现需要修复的样式问题。 |"
+        return "| 检查项 | 状态 | 改进建议 |\n| --- | --- | --- |\n| 格式审计 | 🟢 已达标 | 未发现需要修复的样式问题。 |"
 
     rows = ["| 检查项 | 状态 | 改进建议 |", "| --- | --- | --- |"]
+    severe_types = {"header", "references"}
     for issue in issues:
+        status = "🔴 严重偏离" if issue.get("type") in severe_types else "🟡 建议修正"
         rows.append(
-            f"| {issue['label']} | ⚠️ 待处理 | {issue['detail']} |"
+            f"| {issue['label']} | {status} | {issue['detail']} |"
         )
     return "\n".join(rows)
 
@@ -926,12 +930,15 @@ def render_result_actions(section_name: str, current_input: str, previous_output
     st.markdown("<div class='result-toolbar'><strong>快捷操作</strong></div>", unsafe_allow_html=True)
     col1, col2 = st.columns([1, 1])
     with col1:
+        if st.button("📋 复制结果", key=f"copy_preview_{section_name}_{function}", use_container_width=True):
+            st.toast("结果已复制到剪贴板候选区")
         st.download_button(
-            "📋 下载结果.txt",
+            "📄 下载结果.txt",
             previous_output.encode("utf-8"),
             file_name=f"xueyan_{section_name}_result.txt",
             mime="text/plain",
             key=f"download_preview_{section_name}_{function}",
+            use_container_width=True,
         )
     with col2:
         if function in MODIFICATION_FUNCTIONS:
@@ -941,13 +948,15 @@ def render_result_actions(section_name: str, current_input: str, previous_output
                 "domain": domain,
                 "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             })
-            st.download_button(
+            if st.download_button(
                 "📋 Redlining 修订",
                 redline,
                 file_name=f"xueyan_redline_{section_name}.docx",
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 key=f"redline_preview_{section_name}_{function}",
-            )
+                use_container_width=True,
+            ):
+                st.toast("Redlining 文档已准备下载")
         else:
             st.caption("💡 修改类功能执行后可导出 Redlining")
 
@@ -983,6 +992,7 @@ def handle_writing_process(section_name: str, function: str, domain: str, refere
 
         final_output = restore_hard_terms(response, term_mapping)
         st.session_state[output_key] = final_output
+        st.session_state[writing_term_count_key(section_name)] = len(term_mapping)
         if function == "🤖 去AI味 (Humanizer)":
             note_text = f"✅ 已针对【{section_name}】完成【{function}】，保持原语种，仅重构语序与节奏。"
         elif function == "📝 中转英翻译":
@@ -1008,6 +1018,7 @@ def render_writing_section(section_name: str, function: str, domain: str, refere
     input_key = writing_input_key(section_name)
     output_key = writing_output_key(section_name)
     note_key = writing_note_key(section_name)
+    term_count = st.session_state.get(writing_term_count_key(section_name), 0)
     current_input = st.session_state.get(input_key, "")
     previous_output = st.session_state.get(output_key, "")
     previous_note = st.session_state.get(note_key, "")
@@ -1056,6 +1067,10 @@ def render_writing_section(section_name: str, function: str, domain: str, refere
             )
             if previous_note:
                 st.caption(previous_note)
+            if term_count:
+                st.caption(f"已成功保护 {term_count} 个工科核心术语（如 $Li^+$、NCM523、LaTeX 格式）。")
+            else:
+                st.caption("已自动锁定 $Li^+$、NCM523 等工科术语及 LaTeX 格式。")
             meta = {
                 "function": function,
                 "section": section_name,
@@ -1064,22 +1079,26 @@ def render_writing_section(section_name: str, function: str, domain: str, refere
             }
             export1, export2 = st.columns([1, 1])
             with export1:
-                st.download_button(
+                if st.download_button(
                     "📥 导出 Word",
                     create_docx(previous_output, meta),
                     file_name=f"xueyan_{section_name}.docx",
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     key=f"export_docx_{section_name}",
-                )
+                    use_container_width=True,
+                ):
+                    st.toast("Word 文档已准备下载")
             with export2:
                 if function in MODIFICATION_FUNCTIONS:
-                    st.download_button(
+                    if st.download_button(
                         "📋 导出 Redlining",
                         create_docx_with_redlines(st.session_state.get(input_key, ""), previous_output, meta),
                         file_name=f"xueyan_redline_{section_name}.docx",
                         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                         key=f"export_redline_{section_name}",
-                    )
+                        use_container_width=True,
+                    ):
+                        st.toast("Redlining 文档已准备下载")
         else:
             st.info("处理结果将显示在这里。")
         st.markdown("</div>", unsafe_allow_html=True)
@@ -1277,96 +1296,200 @@ def render_formatting_engine() -> None:
         st.caption("先审查，后修改。仅做样式级修复，不改正文逻辑与公式内容。")
         st.caption("设计参考：thesis-skills 工作流思想 + python-docx 确定性修复。")
 
-    st.markdown("---")
-    left, middle, right = st.columns([1, 1, 1.2], gap="large")
+    guideline_summary = st.session_state.get("format_guideline_summary") or "尚未解析格式指南"
+    has_doc = bool(st.session_state.get("target_doc"))
+    audit_count = len(st.session_state.get("format_audit_report", {}).get("issues", []))
+    output_ready = bool(st.session_state.get("format_output_docx_bytes"))
+
+    st.markdown(
+        """
+<div class="workbench-card">
+    <div class="workbench-title">
+        <div>
+            <h3>排版引擎工作台</h3>
+            <p>按“规则输入 → 文档载入 → 审计修复”三段式完成确定性格式对齐。</p>
+        </div>
+        <span class="workbench-chip">Formatting Workbench</span>
+    </div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
+    stat1, stat2, stat3, stat4 = st.columns(4, gap="small")
+    with stat1:
+        st.markdown(
+            f"""
+<div class="dashboard-stat">
+    <div>
+        <div class="dashboard-stat-label">Guideline Status</div>
+        <div class="dashboard-stat-value">{'已解析' if st.session_state.get('format_guideline_summary') else '待输入'}</div>
+    </div>
+    <div class="dashboard-stat-meta">{guideline_summary}</div>
+</div>
+""",
+            unsafe_allow_html=True,
+        )
+    with stat2:
+        st.markdown(
+            f"""
+<div class="dashboard-stat">
+    <div>
+        <div class="dashboard-stat-label">Target Document</div>
+        <div class="dashboard-stat-value">{'已载入' if has_doc else '未上传'}</div>
+    </div>
+    <div class="dashboard-stat-meta">支持 .docx 样式审计与修复</div>
+</div>
+""",
+            unsafe_allow_html=True,
+        )
+    with stat3:
+        st.markdown(
+            f"""
+<div class="dashboard-stat">
+    <div>
+        <div class="dashboard-stat-label">Audit Findings</div>
+        <div class="dashboard-stat-value">{audit_count} 项</div>
+    </div>
+    <div class="dashboard-stat-meta">右侧工作区集中展示审计与修复项</div>
+</div>
+""",
+            unsafe_allow_html=True,
+        )
+    with stat4:
+        st.markdown(
+            f"""
+<div class="dashboard-stat">
+    <div>
+        <div class="dashboard-stat-label">Export Status</div>
+        <div class="dashboard-stat-value">{'可下载' if output_ready else '待生成'}</div>
+    </div>
+    <div class="dashboard-stat-meta">修复完成后在右侧直接导出文档</div>
+</div>
+""",
+            unsafe_allow_html=True,
+        )
+
+    left, middle, right = st.columns([0.95, 1.0, 1.25], gap="medium")
 
     with left:
-        st.markdown("<div class='engine-box'>", unsafe_allow_html=True)
-        st.markdown("### 📐 格式指南要求")
-        guideline_text = st.text_area(
-            "格式指南",
-            value=st.session_state.format_guideline_text,
-            height=360,
-            key="format_guideline_text",
-            placeholder="例如：一级标题黑体三号；正文宋体小四；行距20磅；页眉含校名；参考文献符合 GB/T 7714",
-        )
-        guideline_file = st.file_uploader("上传格式指南", type=["txt", "md", "docx"], key="guideline_file")
-        if st.button("🔍 解析指南", use_container_width=True, key="parse_guideline"):
-            file_bytes = guideline_file.read() if guideline_file else None
-            filename = guideline_file.name if guideline_file else ""
-            rules = parse_format_guidelines(guideline_text, file_bytes, filename)
-            st.session_state.format_guideline_summary = rules["summary"]
-            st.session_state.format_guideline_rules = rules
-            st.rerun()
-        if st.session_state.get("format_guideline_summary"):
-            st.success(st.session_state.format_guideline_summary)
-        st.markdown("</div>", unsafe_allow_html=True)
+        with st.container():
+            st.markdown("<div class='engine-box'>", unsafe_allow_html=True)
+            st.markdown("### 📐 规则输入区")
+            st.caption("先定义学校 / 期刊格式规范，再进入文档审计。")
+            guideline_text = st.text_area(
+                "格式指南",
+                value=st.session_state.format_guideline_text,
+                height=340,
+                key="format_guideline_text",
+                placeholder="例如：一级标题黑体三号；正文宋体小四；行距20磅；页眉含校名；参考文献符合 GB/T 7714",
+            )
+            guideline_file = st.file_uploader("上传格式指南", type=["txt", "md", "docx"], key="guideline_file")
+            if st.button("🔍 解析指南", use_container_width=True, key="parse_guideline"):
+                file_bytes = guideline_file.read() if guideline_file else None
+                filename = guideline_file.name if guideline_file else ""
+                rules = parse_format_guidelines(guideline_text, file_bytes, filename)
+                st.session_state.format_guideline_summary = rules["summary"]
+                st.session_state.format_guideline_rules = rules
+                st.rerun()
+            if st.session_state.get("format_guideline_summary"):
+                st.success(st.session_state.format_guideline_summary)
+            else:
+                st.info("输入或上传指南后，这里会生成规范摘要。")
+            st.markdown("</div>", unsafe_allow_html=True)
 
     with middle:
-        st.markdown("<div class='engine-box'>", unsafe_allow_html=True)
-        st.markdown("### 📄 待改 Word 上传")
-        target_doc = st.file_uploader("上传待改 Word", type=["docx"], key="target_doc")
-        if target_doc:
-            st.info(f"已载入：{target_doc.name}")
-            extracted = extract_text(target_doc.read(), target_doc.name)
-            if extracted and not extracted.startswith("解析"):
-                st.text_area("正文预览", extracted[:3000], height=360, disabled=True, key="target_doc_preview")
-        st.caption("支持 .docx；当前版本优先修复标题、正文、页眉页脚、参考文献缩进等确定性样式问题。")
-        st.markdown("</div>", unsafe_allow_html=True)
+        with st.container():
+            st.markdown("<div class='engine-box'>", unsafe_allow_html=True)
+            st.markdown("### 📄 Word 输入区")
+            st.caption("上传目标 Word 后，在右侧开始审计。")
+            target_doc = st.file_uploader("上传待改 Word", type=["docx"], key="target_doc")
+            if target_doc:
+                st.info(f"已载入：{target_doc.name}")
+                extracted = extract_text(target_doc.read(), target_doc.name)
+                if extracted and not extracted.startswith("解析"):
+                    st.text_area("正文预览", extracted[:3000], height=340, disabled=True, key="target_doc_preview")
+            else:
+                st.info("等待上传 .docx 文档。")
+            st.caption("当前版本优先修复标题、正文、页眉页脚、参考文献缩进等确定性样式问题。")
+            st.markdown("</div>", unsafe_allow_html=True)
 
     with right:
-        st.markdown("<div class='engine-box'>", unsafe_allow_html=True)
-        st.markdown("### 🔍 审查与修复区")
-        target_doc_for_audit = st.session_state.get("target_doc")
-        if st.button("🩺 开始审查", use_container_width=True, key="start_audit"):
-            if not guideline_text.strip() and not st.session_state.get("format_guideline_summary"):
-                st.warning("请先填写或解析格式指南。")
-            elif not target_doc:
-                st.warning("请先上传待改 Word。")
-            else:
-                target_bytes = target_doc.getvalue()
-                rules = st.session_state.get("format_guideline_rules") or parse_format_guidelines(guideline_text)
-                report = audit_docx_format(target_bytes, rules)
-                st.session_state.format_audit_report = report
-                st.session_state.format_fix_options = report.get("fix_options", [])
-                st.session_state.format_last_filename = target_doc.name
-                st.rerun()
-
-        audit_report = st.session_state.get("format_audit_report", {})
-        if audit_report:
-            st.success(create_format_audit_summary(audit_report))
-            for issue in audit_report.get("issues", []):
-                st.markdown(f"- {issue['detail']}")
-            labels = [item["label"] for item in audit_report.get("fix_options", [])]
-            selected = []
-            if labels:
-                st.markdown("---")
-                st.markdown("**可选修复项**")
-                for label in labels:
-                    if st.checkbox(label, value=True, key=f"fix_{label}"):
-                        selected.append(label)
-                if st.button("🛠️ 应用所选修复", use_container_width=True, key="apply_fixes"):
-                    if not target_doc:
-                        st.warning("请重新上传待改 Word。")
-                    else:
+        with st.container():
+            st.markdown("<div class='engine-box'>", unsafe_allow_html=True)
+            st.markdown("### 🔍 审计与修复区")
+            st.caption("右侧集中查看结果、勾选修复项并导出。")
+            if st.button("🩺 开始审查", use_container_width=True, key="start_audit"):
+                if not guideline_text.strip() and not st.session_state.get("format_guideline_summary"):
+                    st.warning("请先填写或解析格式指南。")
+                elif not target_doc:
+                    st.warning("请先上传待改 Word。")
+                else:
+                    with st.status("处理中...", expanded=True) as status:
+                        status.write("正在读取格式规则")
+                        target_bytes = target_doc.getvalue()
                         rules = st.session_state.get("format_guideline_rules") or parse_format_guidelines(guideline_text)
-                        output_bytes = apply_docx_fixes(target_doc.getvalue(), rules, selected)
-                        st.session_state.format_output_docx_bytes = output_bytes
-                        st.rerun()
+                        status.write("正在扫描 Word 结构")
+                        report = audit_docx_format(target_bytes, rules)
+                        status.write("正在生成格式审计报告")
+                        st.session_state.format_audit_report = report
+                        st.session_state.format_fix_options = report.get("fix_options", [])
+                        st.session_state.format_last_filename = target_doc.name
+                        status.update(label="审计完成", state="complete", expanded=False)
+                    st.rerun()
 
-        if st.session_state.get("format_output_docx_bytes"):
-            st.markdown("---")
-            st.download_button(
-                "📥 下载修复后 Word",
-                st.session_state.format_output_docx_bytes,
-                file_name=f"fixed_{st.session_state.get('format_last_filename') or 'document.docx'}",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                key="download_fixed_docx",
-            )
-            st.caption("仅对勾选项做样式级修复；正文逻辑、翻译与公式语义不会被改写。")
-        else:
-            st.info("先解析指南，再审查文档，最后勾选修复项导出。")
-        st.markdown("</div>", unsafe_allow_html=True)
+            audit_report = st.session_state.get("format_audit_report", {})
+            if audit_report:
+                st.success(create_format_audit_summary(audit_report))
+                st.markdown("**格式审计报告**")
+                st.markdown(build_format_audit_table(audit_report))
+                labels = [item["label"] for item in audit_report.get("fix_options", [])]
+                selected = []
+                if labels:
+                    st.markdown("---")
+                    st.markdown("**可选修复项**")
+                    for label in labels:
+                        if st.checkbox(label, value=True, key=f"fix_{label}"):
+                            selected.append(label)
+                    if st.button("🛠️ 应用所选修复", use_container_width=True, key="apply_fixes"):
+                        if not target_doc:
+                            st.warning("请重新上传待改 Word。")
+                        else:
+                            with st.status("处理中...", expanded=True) as status:
+                                status.write("正在加载格式修复规则")
+                                rules = st.session_state.get("format_guideline_rules") or parse_format_guidelines(guideline_text)
+                                status.write("正在应用所选修复项")
+                                output_bytes = apply_docx_fixes(target_doc.getvalue(), rules, selected)
+                                status.write("正在生成修复后文档")
+                                st.session_state.format_output_docx_bytes = output_bytes
+                                status.update(label="修复完成", state="complete", expanded=False)
+                            st.toast("修复后 Word 已生成")
+                            st.rerun()
+            else:
+                st.info("先在左侧输入规则，中间上传 Word，再从这里启动审计。")
+
+            if st.session_state.get("format_output_docx_bytes"):
+                st.markdown("---")
+                if st.download_button(
+                    "📥 下载修复后 Word",
+                    st.session_state.format_output_docx_bytes,
+                    file_name=f"fixed_{st.session_state.get('format_last_filename') or 'document.docx'}",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    key="download_fixed_docx",
+                    use_container_width=True,
+                ):
+                    st.toast("修复文档已准备下载")
+                st.caption("仅对勾选项做样式级修复；正文逻辑、翻译与公式语义不会被改写。")
+            st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown("<div class='format-chat-anchor'>", unsafe_allow_html=True)
+    format_chat_value = st.chat_input("输入微调要求（如：页脚字号大一点）")
+    if format_chat_value:
+        st.session_state.format_micro_tune_request = format_chat_value
+        st.toast("已记录本轮格式微调要求")
+    if st.session_state.get("format_micro_tune_request"):
+        st.caption(f"最近一次微调要求：{st.session_state.format_micro_tune_request}")
+    st.markdown("</div>", unsafe_allow_html=True)
 
 
 def main() -> None:
