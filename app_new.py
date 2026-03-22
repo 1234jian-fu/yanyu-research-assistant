@@ -8,6 +8,7 @@ import re
 import time
 import json
 import base64
+import random
 from html import escape
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -408,6 +409,40 @@ CONFIG = {
         padding: 0.75rem 0.9rem;
         margin-bottom: 0.55rem;
     }
+    .viz-preview-shell {
+        width: 100%;
+        border: 1px solid #dbe7f5;
+        border-radius: 16px;
+        background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.85), 0 8px 24px rgba(15, 23, 42, 0.04);
+        padding: 0.8rem;
+        overflow: hidden;
+    }
+    .viz-preview-frame {
+        width: 100%;
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 12px;
+        background: radial-gradient(circle at top, rgba(191, 219, 254, 0.35), rgba(255,255,255,0.92));
+        border: 1px dashed #cbd5e1;
+    }
+    .viz-preview-frame img {
+        max-width: 100%;
+        width: auto;
+        height: auto;
+        object-fit: contain;
+        border-radius: 12px;
+        box-shadow: 0 10px 24px rgba(15, 23, 42, 0.10);
+    }
+    .viz-preview-empty {
+        max-width: 78%;
+        text-align: center;
+        color: #64748b;
+        font-size: 0.92rem;
+        line-height: 1.6;
+    }
     .workbench-title {
         display: flex;
         justify-content: space-between;
@@ -598,6 +633,17 @@ VIZ_DEFAULT_STATE = {
     "current_result_id": None,
     "current_parent_id": None,
     "iteration_instruction": "",
+    "local_area_hint": "",
+    "inpaint_strength": 0.35,
+    "preserve_composition": True,
+    "edit_mode": "局部进化",
+    "iteration_mode": "text-to-image",
+    "seed_value": None,
+    "current_seed": None,
+    "current_image_seed": None,
+    "style_reference_image": None,
+    "style_reference_name": "",
+    "style_strength": 0.6,
     "history": [],
     "active_history_id": None,
     "generation_counter": 0,
@@ -801,6 +847,20 @@ def collect_uploaded_images(uploaded_files) -> List[dict]:
             "bytes": file_bytes,
         })
     return images
+
+
+def collect_uploaded_image(uploaded_file) -> dict | None:
+    if uploaded_file is None:
+        return None
+    try:
+        file_bytes = uploaded_file.getvalue()
+    except Exception:
+        file_bytes = uploaded_file.read()
+    return {
+        "name": uploaded_file.name,
+        "mime": getattr(uploaded_file, "type", "image/png") or "image/png",
+        "bytes": file_bytes,
+    }
 
 
 def analyze_ppt_template(template_bytes: bytes, filename: str) -> dict:
@@ -1331,13 +1391,11 @@ def build_viz_prompt_bundle(viz_state: dict) -> dict:
 
 
 def build_viz_iteration_prompt(viz_state: dict) -> str:
-    prompt_seed = viz_state.get("expanded_prompt") or viz_state.get("base_prompt")
     instruction = viz_state.get("iteration_instruction", "").strip()
     return (
-        f"{prompt_seed}\n\n"
-        "This is an iterative refinement based on the current previously generated figure. "
-        "Keep the overall scientific subject and composition continuity unless the modification explicitly requests otherwise.\n\n"
-        f"Modification instruction:\n{instruction}"
+        "Based on the previous image, KEEP 90% of the composition. "
+        f"ONLY change the following part: {instruction}. "
+        "Keep the materials, lighting and camera angle identical."
     ).strip()
 
 
@@ -1358,29 +1416,97 @@ def get_viz_image_bytes(image_url: str) -> bytes | None:
         return None
 
 
-def call_gemini_image(prompt: str, aspect_ratio: str = "1:1") -> tuple[str, bytes | None]:
-    payload = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {
-            "responseModalities": ["TEXT", "IMAGE"],
-            "imageConfig": {
-                "aspectRatio": aspect_ratio,
-                "imageSize": "1K",
-            },
+def render_viz_image_slot(image_url: str = "", empty_text: str = "尚未生成图片。", container_height: int = 380, image_max_height: int = 350) -> None:
+    safe_text = escape(empty_text)
+    if image_url:
+        html = f"""
+        <div class=\"viz-preview-shell\" style=\"height:{container_height}px;\">
+            <div class=\"viz-preview-frame\">
+                <img src=\"{image_url}\" style=\"max-height:100%; width:auto; object-fit:contain;\" alt=\"viz preview\" />
+            </div>
+        </div>
+        """
+    else:
+        html = f"""
+        <div class=\"viz-preview-shell\" style=\"height:{container_height}px;\">
+            <div class=\"viz-preview-frame\">
+                <div class=\"viz-preview-empty\">{safe_text}</div>
+            </div>
+        </div>
+        """
+    st.html(html)
+
+
+def call_gemini_image(
+    prompt: str,
+    aspect_ratio: str = "1:1",
+    reference_image_bytes: bytes | None = None,
+    reference_mime: str = "image/png",
+    seed: int | None = None,
+    strength: float | None = None,
+    style_reference_image: dict | None = None,
+    style_strength: float | None = None,
+) -> tuple[str, bytes | None, int | None]:
+    parts = [{"text": prompt}]
+    if reference_image_bytes:
+        parts.append({
+            "inline_data": {
+                "mime_type": reference_mime,
+                "data": base64.b64encode(reference_image_bytes).decode("utf-8"),
+            }
+        })
+    if style_reference_image and style_reference_image.get("bytes"):
+        parts.append({
+            "inline_data": {
+                "mime_type": style_reference_image.get("mime", "image/png"),
+                "data": base64.b64encode(style_reference_image["bytes"]).decode("utf-8"),
+            }
+        })
+    generation_config = {
+        "responseModalities": ["TEXT", "IMAGE"],
+        "imageConfig": {
+            "aspectRatio": aspect_ratio,
+            "imageSize": "1K",
         },
+    }
+    if seed is not None:
+        generation_config["seed"] = seed
+    if strength is not None:
+        generation_config["imageStrength"] = strength
+    if style_reference_image and style_reference_image.get("bytes"):
+        generation_config["styleStrength"] = style_strength if style_strength is not None else 0.6
+    payload = {
+        "contents": [{"parts": parts}],
+        "generationConfig": generation_config,
     }
     headers = {
         "Content-Type": "application/json",
         "X-goog-api-key": GEMINI_API_KEY,
     }
-    resp = requests.post(
-        f"{GEMINI_BASE_URL}/v1beta/models/{GEMINI_MODEL}:generateContent",
-        json=payload,
-        headers=headers,
-        timeout=90,
-    )
-    resp.raise_for_status()
-    data = resp.json()
+
+    def _post_with_payload(active_payload: dict) -> requests.Response:
+        resp = requests.post(
+            f"{GEMINI_BASE_URL}/v1beta/models/{GEMINI_MODEL}:generateContent",
+            json=active_payload,
+            headers=headers,
+            timeout=90,
+        )
+        resp.raise_for_status()
+        return resp
+
+    try:
+        resp = _post_with_payload(payload)
+    except requests.HTTPError:
+        fallback_payload = deepcopy(payload)
+        fallback_config = fallback_payload.get("generationConfig", {})
+        fallback_config.pop("imageStrength", None)
+        fallback_config.pop("seed", None)
+        resp = _post_with_payload(fallback_payload)
+        data = resp.json()
+        effective_seed = None
+    else:
+        data = resp.json()
+        effective_seed = seed
     candidates = data.get("candidates") or []
     if not candidates:
         raise ValueError(f"Unexpected Gemini response: {json.dumps(data, ensure_ascii=False)[:500]}")
@@ -1393,19 +1519,39 @@ def call_gemini_image(prompt: str, aspect_ratio: str = "1:1") -> tuple[str, byte
         if not b64_data:
             continue
         image_bytes = base64.b64decode(b64_data)
-        image_url = f"data:{inline_data.get('mimeType', 'image/png')};base64,{b64_data}"
-        return image_url, image_bytes
+        image_url = f"data:{inline_data.get('mimeType', inline_data.get('mime_type', 'image/png'))};base64,{b64_data}"
+        return image_url, image_bytes, effective_seed
     raise ValueError(f"Gemini response contained no image parts: {json.dumps(data, ensure_ascii=False)[:500]}")
 
 
-def generate_viz_image(prompt: str, generation_index: int, aspect_ratio: str) -> dict:
+def generate_viz_image(
+    prompt: str,
+    generation_index: int,
+    aspect_ratio: str,
+    reference_image_bytes: bytes | None = None,
+    reference_mime: str = "image/png",
+    seed: int | None = None,
+    strength: float | None = None,
+    style_reference_image: dict | None = None,
+    style_strength: float | None = None,
+) -> dict:
     try:
-        image_url, image_bytes = call_gemini_image(prompt, aspect_ratio=aspect_ratio)
+        image_url, image_bytes, effective_seed = call_gemini_image(
+            prompt,
+            aspect_ratio=aspect_ratio,
+            reference_image_bytes=reference_image_bytes,
+            reference_mime=reference_mime,
+            seed=seed,
+            strength=strength,
+            style_reference_image=style_reference_image,
+            style_strength=style_strength,
+        )
         return {
             "id": f"viz-{generation_index}",
             "prompt": prompt,
             "image_url": image_url,
             "image_bytes": image_bytes,
+            "seed": effective_seed,
             "error": "",
         }
     except Exception as exc:
@@ -1414,6 +1560,7 @@ def generate_viz_image(prompt: str, generation_index: int, aspect_ratio: str) ->
             "prompt": prompt,
             "image_url": "",
             "image_bytes": None,
+            "seed": seed,
             "error": str(exc),
         }
 
@@ -1449,6 +1596,17 @@ def append_viz_history_entry(viz_state: dict, prompt_used: str, iteration_instru
         "image_url": viz_state.get("current_image_url", ""),
         "image_bytes": viz_state.get("current_image_bytes", b""),
         "iteration_instruction": iteration_instruction,
+        "local_area_hint": viz_state.get("local_area_hint", ""),
+        "inpaint_strength": viz_state.get("inpaint_strength", 0.35),
+        "preserve_composition": viz_state.get("preserve_composition", True),
+        "edit_mode": viz_state.get("edit_mode", "局部进化"),
+        "iteration_mode": viz_state.get("iteration_mode", "text-to-image"),
+        "seed_value": viz_state.get("seed_value"),
+        "current_seed": viz_state.get("current_seed"),
+        "current_image_seed": viz_state.get("current_image_seed"),
+        "style_reference_image": deepcopy(viz_state.get("style_reference_image")),
+        "style_reference_name": viz_state.get("style_reference_name", ""),
+        "style_strength": viz_state.get("style_strength", 0.6),
         "prompt_used": prompt_used,
     })
     viz_state["history"] = viz_state["history"][:30]
@@ -1462,7 +1620,9 @@ def restore_viz_history_entry(viz_state: dict, entry_id: str) -> None:
         for key in [
             "material_name", "component_tags_text", "usage", "scene", "style", "emphasis_points_text", "structure_notes",
             "description", "label_mode", "label_language", "info_density", "aspect_ratio", "logic_summary", "base_prompt",
-            "prompt_with_labels", "prompt_without_labels", "compact_prompt", "expanded_prompt"
+            "prompt_with_labels", "prompt_without_labels", "compact_prompt", "expanded_prompt", "local_area_hint",
+            "inpaint_strength", "preserve_composition", "edit_mode", "iteration_mode", "seed_value", "current_seed", "current_image_seed",
+            "style_reference_image", "style_reference_name", "style_strength"
         ]:
             viz_state[key] = entry.get(key, deepcopy(VIZ_DEFAULT_STATE.get(key)))
         viz_state["component_tags"] = list(entry.get("component_tags", []))
@@ -2742,8 +2902,14 @@ def render_viz_history_panel(viz_state: dict) -> None:
         with st.expander(title, expanded=False):
             st.caption(f"链路: {entry.get('parent_id') or 'ROOT'} → {entry['id']}")
             st.caption(entry.get("description", "")[:180] or "无描述")
-            if entry.get("image_url"):
-                st.image(entry["image_url"], use_container_width=True)
+            render_viz_image_slot(entry.get("image_url", ""), empty_text="该历史版本没有可预览图片。", container_height=240, image_max_height=190)
+            meta_bits = []
+            if entry.get("iteration_mode"):
+                meta_bits.append(f"模式：{entry['iteration_mode']}")
+            if entry.get("current_seed") is not None:
+                meta_bits.append(f"Seed：{entry['current_seed']}")
+            if meta_bits:
+                st.caption(" | ".join(meta_bits))
             c1, c2 = st.columns([1, 1])
             with c1:
                 if st.button("📥 恢复此版本", key=f"viz_restore_{entry['id']}", use_container_width=True):
@@ -2882,6 +3048,27 @@ def render_viz_engine() -> None:
                 index=style_options.index(viz_state.get("style", style_options[0])) if viz_state.get("style", style_options[0]) in style_options else 0,
                 key="viz_style",
             )
+            style_reference_file = st.file_uploader(
+                "上传风格参考图（例如：Nature 期刊插图）",
+                type=["png", "jpg", "jpeg"],
+                key="viz_style_reference_file",
+            )
+            if style_reference_file is not None:
+                style_reference = collect_uploaded_image(style_reference_file)
+                viz_state["style_reference_image"] = style_reference
+                viz_state["style_reference_name"] = style_reference.get("name", "") if style_reference else ""
+            elif viz_state.get("style_reference_name") and not viz_state.get("style_reference_image"):
+                viz_state["style_reference_name"] = ""
+            if viz_state.get("style_reference_image"):
+                st.image(viz_state["style_reference_image"]["bytes"], caption=viz_state.get("style_reference_name") or "风格参考图", width=160)
+            viz_state["style_strength"] = st.slider(
+                "风格模仿强度",
+                min_value=0.0,
+                max_value=1.0,
+                value=float(viz_state.get("style_strength", 0.6)),
+                step=0.1,
+                key="viz_style_strength",
+            )
             col1, col2 = st.columns(2)
             with col1:
                 viz_state["label_mode"] = st.radio(
@@ -2963,21 +3150,36 @@ def render_viz_engine() -> None:
                 viz_state["base_prompt"] = prompt_to_use
                 viz_state["generation_counter"] += 1
                 viz_state["current_parent_id"] = None if generate_clicked else viz_state.get("current_parent_id")
+                seed_to_use = viz_state.get("current_seed")
+                if seed_to_use is None:
+                    seed_to_use = random.randint(100000, 999999)
+                    viz_state["seed_value"] = seed_to_use
+                    viz_state["current_seed"] = seed_to_use
                 with st.spinner("正在生成图片..."):
-                    result = generate_viz_image(prompt_to_use, viz_state["generation_counter"], viz_state.get("aspect_ratio", "1:1"))
+                    result = generate_viz_image(
+                        prompt_to_use,
+                        viz_state["generation_counter"],
+                        viz_state.get("aspect_ratio", "1:1"),
+                        seed=seed_to_use,
+                        style_reference_image=viz_state.get("style_reference_image"),
+                        style_strength=float(viz_state.get("style_strength", 0.6)),
+                    )
                 if result.get("error"):
                     viz_state["last_error"] = result["error"]
                     st.error(result["error"])
                 else:
+                    viz_state["iteration_mode"] = "text-to-image"
                     viz_state["current_result_id"] = result["id"]
                     viz_state["current_image_url"] = result["image_url"]
                     viz_state["current_image_bytes"] = result.get("image_bytes") or b""
+                    viz_state["current_seed"] = result.get("seed")
+                    viz_state["current_image_seed"] = result.get("seed")
                     viz_state["last_error"] = ""
                     append_viz_history_entry(viz_state, prompt_to_use)
 
         st.markdown("### 当前结果")
         if viz_state.get("current_image_url"):
-            st.image(viz_state["current_image_url"], use_container_width=True)
+            render_viz_image_slot(viz_state["current_image_url"], empty_text="尚未生成图片。", container_height=380, image_max_height=350)
             dcol1, dcol2 = st.columns([1, 1])
             with dcol1:
                 st.download_button(
@@ -2989,18 +3191,19 @@ def render_viz_engine() -> None:
                     key="viz_current_download",
                 )
             with dcol2:
-                st.success("当前结果已就绪，可直接继续修改。")
+                seed_label = viz_state.get("current_image_seed")
+                st.success(f"当前结果已就绪，可直接继续修改。Seed：{seed_label if seed_label is not None else '自动'}")
         else:
-            st.info("尚未生成图片。填写左侧参数和描述后，点击“生成图片”。")
+            render_viz_image_slot("", empty_text="尚未生成图片。填写左侧参数和描述后，点击“生成图片”。", container_height=380, image_max_height=350)
 
         st.markdown("### 继续修改当前结果")
-        viz_state["iteration_instruction"] = st.text_area(
-            "修改指令",
+        viz_state["iteration_instruction"] = st.text_input(
+            "修改框",
             value=viz_state.get("iteration_instruction", ""),
-            height=90,
-            placeholder="例如：把主结构改为蓝绿色半透明；增加一个局部放大框；把箭头改为更清晰的发光路径。",
+            placeholder="例如：把 Li+ 改为红色 / 把右上角放大框增强一点",
             key="viz_iteration_instruction",
         )
+        st.caption(f"锁定构图：已启用 | 参考原图局部重绘 | 当前 Seed：{viz_state.get('current_seed') if viz_state.get('current_seed') is not None else '自动'}")
         apply_edit_clicked = st.button("应用修改", use_container_width=True, key="viz_apply_edit")
         if apply_edit_clicked:
             if not viz_state.get("current_image_url"):
@@ -3012,18 +3215,35 @@ def render_viz_engine() -> None:
             else:
                 parent_id = viz_state.get("current_result_id")
                 iteration_prompt = build_viz_iteration_prompt(viz_state)
+                reference_image_bytes = viz_state.get("current_image_bytes") or get_viz_image_bytes(viz_state.get("current_image_url", ""))
                 viz_state["generation_counter"] += 1
+                seed_to_use = viz_state.get("current_seed") or random.randint(100000, 999999)
+                viz_state["seed_value"] = seed_to_use
+                viz_state["current_seed"] = seed_to_use
+                strength_to_use = min(float(viz_state.get("inpaint_strength", 0.35)), 0.35)
                 with st.spinner("正在基于当前结果生成新版本..."):
-                    result = generate_viz_image(iteration_prompt, viz_state["generation_counter"], viz_state.get("aspect_ratio", "1:1"))
+                    result = generate_viz_image(
+                        iteration_prompt,
+                        viz_state["generation_counter"],
+                        viz_state.get("aspect_ratio", "1:1"),
+                        reference_image_bytes=reference_image_bytes,
+                        seed=seed_to_use,
+                        strength=strength_to_use,
+                        style_reference_image=viz_state.get("style_reference_image"),
+                        style_strength=float(viz_state.get("style_strength", 0.6)),
+                    )
                 if result.get("error"):
                     viz_state["last_error"] = result["error"]
                     st.error(result["error"])
                 else:
                     viz_state["base_prompt"] = iteration_prompt
+                    viz_state["iteration_mode"] = "reference-refine"
                     viz_state["current_parent_id"] = parent_id
                     viz_state["current_result_id"] = result["id"]
                     viz_state["current_image_url"] = result["image_url"]
                     viz_state["current_image_bytes"] = result.get("image_bytes") or b""
+                    viz_state["current_seed"] = result.get("seed")
+                    viz_state["current_image_seed"] = result.get("seed")
                     viz_state["last_error"] = ""
                     append_viz_history_entry(viz_state, iteration_prompt, viz_state["iteration_instruction"])
 
