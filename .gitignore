@@ -15,3 +15,6 @@ ENV/
 *.db
 *.log
 .DS_Store
+.claude/
+output/
+outputs/
