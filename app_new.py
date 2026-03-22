@@ -38,7 +38,8 @@ CLAUDE_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
 DEFAULT_STATES = {
     "history": [],              # 历史时光机（按板块+功能分类）
     "reference_docs": {},       # 标杆文献库 {filename: style_analysis}
-    "current_input": "",        # 当前输入
+    "pending_import_text": "", # 待导入到当前板块的文本
+    "active_section": "摘要",   # 当前激活板块
     "loaded_skills": False,     # Skills加载状态
 }
 
@@ -51,8 +52,8 @@ for key, default in DEFAULT_STATES.items():
 # 15+ 功能矩阵（单一职责）
 FUNCTION_MATRIX = {
     "📝 中转英翻译": {
-        "description": "仅执行语种转换：CN↔EN，禁止润色",
-        "rules": ["✅ 必须语种转换", "❌ 禁止同语输出", "✅ 学术语体"]
+        "description": "执行中英双向学术翻译，允许必要学术化优化",
+        "rules": ["✅ 必须跨语种输出", "❌ 禁止同语输出", "✅ 学术翻译优先"]
     },
     "✨ 表达润色": {
         "description": "提升学术地道性，同语言优化",
@@ -196,17 +197,45 @@ HUMANIZER_RULES = """
 4. **三点式堆砌**: A, B, and C 结构过多
 5. **促销腔**: "exciting", "promising", "novel", "groundbreaking"
 6. **空洞-ing分析**: "indicating", "suggesting", "implying" 滥用
+7. **陈词滥调**: "综上所述", "总而言之", "in conclusion", "it is worth noting that"
 
 ### 人味注入策略
 - 承认不确定性: "suggest", "may", "potentially", "appears to"
 - 节奏变化: 长短句交替，避免单调
 - 自然过渡: 删除机械连接词（Firstly, Secondly, Furthermore）
 - 简洁动词: show, use, find, make (而非 demonstrate, utilize, discover, fabricate)
+- 保留作者语气: 不额外拔高结论，不制造不存在的贡献感
 
 ### 语序优化原则
 - **中文输入**: 优化中文语序，保持中文输出
 - **英文输入**: 增强英文节奏感，保持英文输出
 - **零翻译**: 严格禁止语种转换
+"""
+
+TRANSLATION_SKILL_RULES = """
+## Translation Mastery（学术翻译优先）
+- 翻译板块必须执行跨语种转换，严禁同语输出。
+- 中译英时允许必要的学术化表达优化，使输出符合工科论文叙事习惯。
+- 自动补全英文冠词、时态与被动结构，使论述更自然。
+- “改善了/优化了/缓解了/提升了”优先根据上下文映射为 enhanced, optimized, alleviated, improved 等表达。
+- 英译中时消除翻译腔，输出自然、规范、可直接用于学术写作的中文。
+- LaTeX、化学式、材料名、缩写和关键术语必须保持准确。
+"""
+
+RESULTS_SKILL_RULES = """
+## Results 专项写作协议
+- 结果板块优先突出趋势分析、组间对比、异常点解释与图表引用。
+- 遇到实验数据时，优先说明 increase/decrease、higher/lower、plateau、fluctuation 等关系，而非空泛评价。
+- 自动保留并正确处理 LaTeX 公式、化学式、材料名和单位。
+- 对机器学习结果补充 benchmark、ablation、statistical significance、error bar 等意识。
+- 对工科实验结果保持客观，避免把结论写成宣传语。
+"""
+
+DOCX_SKILL_RULES = """
+## DOCX / Redlining 协议
+- Word 导出需保留板块、功能、领域和时间元信息。
+- Redlining 用于展示修改痕迹，不改变单一职责边界。
+- 仅在修改类功能下提供 Redlining 导出，便于对照原文与修订稿。
 """
 
 # ML Paper Writing Checklist（仅用于 Results 板块验证）
@@ -403,12 +432,19 @@ def extract_language_genes(text: str) -> Dict:
     return genes
 
 
-def analyze_reference_paper(docx_bytes: bytes, filename: str) -> str:
+def analyze_reference_paper(file_bytes: bytes, filename: str) -> str:
     """分析标杆文献的写作风格 v2.0 - 语言基因深度提取"""
     try:
-        doc = Document(BytesIO(docx_bytes))
-        paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
-        text = "\n".join(paragraphs[:80])  # 取前80段
+        if filename.lower().endswith('.docx'):
+            doc = Document(BytesIO(file_bytes))
+            paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
+            text = "\n".join(paragraphs[:80])  # 取前80段
+        else:
+            text = extract_text(file_bytes, filename)
+            if not text or text.startswith("解析"):
+                return f"分析失败: 无法解析 {filename}"
+            paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+            text = "\n".join(paragraphs[:80])
 
         # 提取风格特征
         lang = detect_language(text)
@@ -523,12 +559,14 @@ def create_strict_prompt(
 4. **三点式堆砌**: A, B, and C 结构过多
 5. **促销腔**: "exciting", "promising", "novel", "groundbreaking"
 6. **空洞-ing分析**: "indicating", "suggesting", "implying" 滥用
+7. **陈词滥调**: "综上所述", "总而言之", "in conclusion", "it is worth noting that"
 
 ### 人味注入策略
 - **承认不确定性**: "suggest", "may", "potentially", "appears to"
 - **节奏变化**: 长短句交替，避免单调
 - **自然过渡**: 删除机械连接词（Firstly, Secondly, Furthermore）
 - **简洁动词**: show, use, find, make (而非 demonstrate, utilize, discover, fabricate)
+- **语气约束**: 不夸大贡献，不引入新的论点
 
 ### 语序优化原则
 - **当前语言**: {"中文" if lang == "zh" else "英文"}
@@ -538,8 +576,18 @@ def create_strict_prompt(
     else:
         base_injection += HUMANIZER_RULES + "\n"
 
+    if function == "📝 中转英翻译":
+        base_injection += TRANSLATION_SKILL_RULES + "\n"
+
+    if function in {"📋 Redlining修订", "✨ 表达润色", "🤖 去AI味 (Humanizer)", "🎯 精修模式"}:
+        base_injection += DOCX_SKILL_RULES + "\n"
+
+    # 如果是 Results 板块，强化实验结果叙事
+    if section == "结果":
+        base_injection += RESULTS_SKILL_RULES + "\n"
+
     # 如果是 Results 板块且有 ML 写作需求，添加 checklist
-    if section == "结果" and "ML" in domain:
+    if section == "结果" and domain == "🧠 机器学习":
         base_injection += ML_CHECKLIST + "\n"
 
     # 添加标杆文献风格（影子合著者：仅限起草/构思类功能）
@@ -588,22 +636,24 @@ def create_strict_prompt(
 {input_text}
 
 ## 翻译协议（Translation Protocol）
-- **任务定义**：仅做语种转换
+- **任务定义**：必须执行跨语种学术翻译
 - **转换方向**：
-  - 输入为中文 → 输出地道学术英文
-  - 输入为英文 → 输出严谨学术中文
-- **禁止项**：严禁原样输出原文语言
+  - 输入为中文 → 输出地道工科论文英文
+  - 输入为英文 → 输出自然规范学术中文
+- **禁止项**：严禁原样输出原文语言，严禁新增事实
 
 ## 术语与公式硬锁
 - 必须保留 $Li^+$、NCM523、XRD、SEM 等术语与 LaTeX 形式不变
 - 不得改写专业缩写
 
 ## 输出要求
-1. ✅ 仅执行语种转换（必须变为另一语言）
-2. ✅ 保持原意完整
-3. ✅ 学术语体
-4. ✅ 术语与 LaTeX 原样保留
-5. ❌ 禁止润色扩写
+1. ✅ 必须输出目标语种文本
+2. ✅ 保持原意完整，不编造新信息
+3. ✅ 允许必要学术化表达优化，使语句符合工科叙事习惯
+4. ✅ 中译英时自动补全冠词、优化被动语态，并优先使用 enhanced / optimized / alleviated / improved 等准确学术动词
+5. ✅ 英译中时消除翻译腔，确保中文自然、凝练、符合学术表达
+6. ✅ 术语与 LaTeX 原样保留
+7. ❌ 禁止扩写研究结论或夸大贡献
 
 ## 输出格式
 ```
@@ -867,7 +917,7 @@ def get_client():
     wait=wait_exponential(multiplier=1, min=4, max=60),
     retry=retry_if_exception_type((anthropic.APITimeoutError, anthropic.InternalServerError)),
 )
-def call_api(prompt: str, timeout: int = 180) -> str:
+def call_api(prompt: str, timeout: int = 300) -> str:
     client = get_client()
     message = client.messages.create(
         model=CLAUDE_MODEL,
@@ -996,7 +1046,7 @@ with col1:
 with col2:
     st.info(f"📚 {len(LOCAL_SKILLS)} 个学术 Skills")
 with col3:
-    st.success("⏱️ 180s 超时 | 3次重试")
+    st.success("⏱️ 300s 超时 | 3次重试")
 
 # ── 侧边栏：15+功能矩阵 + 影子合著者 ─────────────────────────────────────────
 
@@ -1041,9 +1091,10 @@ with st.sidebar:
         for ref_file in reference_files:
             if ref_file.name not in st.session_state.reference_docs:
                 with st.spinner(f"分析 {ref_file.name}..."):
-                    text = extract_text(ref_file.read(), ref_file.name)
+                    ref_bytes = ref_file.read()
+                    text = extract_text(ref_bytes, ref_file.name)
                     if text and not text.startswith("解析"):
-                        style = analyze_reference_paper(ref_file.read(), ref_file.name)
+                        style = analyze_reference_paper(ref_bytes, ref_file.name)
                         st.session_state.reference_docs[ref_file.name] = style
                         st.success(f"✅ {ref_file.name}")
 
@@ -1059,34 +1110,54 @@ with st.sidebar:
     uploaded_file = st.file_uploader("上传待处理文件", type=["pdf", "docx"])
 
     if uploaded_file:
-        extracted = extract_text(uploaded_file.read(), uploaded_file.name)
+        uploaded_bytes = uploaded_file.read()
+        extracted = extract_text(uploaded_bytes, uploaded_file.name)
         if extracted and not extracted.startswith("解析"):
             st.success(f"✅ 提取 {len(extracted)} 字符")
-            if st.button("📥 填入编辑器"):
-                st.session_state.current_input = extracted[:10000]
+            if st.button("📥 填入当前板块", use_container_width=True):
+                target_input_key = f"input_{st.session_state.active_section}"
+                st.session_state[target_input_key] = extracted[:10000]
+                st.session_state.pending_import_text = ""
                 st.rerun()
 
 # ── 顶部：板块锚点 Tabs ─────────────────────────────────────────────────────
 
 st.markdown("---")
-section_tabs = st.tabs([
-    "📝 摘要",
-    "📘 引言",
-    "🔬 方法",
-    "📊 结果",
-    "💡 讨论",
-    "🏁 结论"
-])
-
-# 确定当前板块
 section_names = ["摘要", "引言", "方法", "结果", "讨论", "结论"]
+section_icons = {
+    "摘要": "📝",
+    "引言": "📘",
+    "方法": "🔬",
+    "结果": "📊",
+    "讨论": "💡",
+    "结论": "🏁",
+}
+active_section = st.segmented_control(
+    "论文板块",
+    options=section_names,
+    default=st.session_state.active_section,
+    format_func=lambda name: f"{section_icons[name]} {name}",
+    key="active_section",
+)
 
 
-def sync_current_input(input_key: str) -> None:
-    st.session_state.current_input = st.session_state.get(input_key, "")
+def apply_pending_import() -> None:
+    pending_text = st.session_state.get("pending_import_text", "")
+    if not pending_text:
+        return
+
+    section_name = st.session_state.active_section
+    input_key = f"input_{section_name}"
+    if input_key in st.session_state:
+        return
+
+    st.session_state[input_key] = pending_text
+    st.session_state.pending_import_text = ""
 
 
 def render_section(section_name: str) -> None:
+    apply_pending_import()
+
     # ── 主区域：左右分栏对比 ─────────────────────────────────────────────────
     st.markdown("---")
     col_left, col_right = st.columns([1, 1])
@@ -1097,15 +1168,12 @@ def render_section(section_name: str) -> None:
         output_key = f"output_{section_name}"
         note_key = f"note_{section_name}"
         if input_key not in st.session_state:
-            st.session_state[input_key] = st.session_state.get("current_input", "")
+            st.session_state[input_key] = ""
         current_input = st.text_area(
             "",
-            value=st.session_state.get(input_key, ""),
             height=400,
             label_visibility="collapsed",
             key=input_key,
-            on_change=sync_current_input,
-            args=(input_key,)
         )
 
         st.caption(f"📊 {len(current_input)} 字符 | 语言: {'中文' if detect_language(current_input) == 'zh' else '英文'}")
@@ -1124,7 +1192,7 @@ def render_section(section_name: str) -> None:
                 st.session_state[input_key] = ""
                 st.session_state[output_key] = ""
                 st.session_state[note_key] = ""
-                st.session_state.current_input = ""
+                st.session_state.pending_import_text = ""
                 st.rerun()
         with btn_col3:
             if st.button("🔄", key=f"rerun_{section_name}"):
@@ -1158,7 +1226,7 @@ def render_section(section_name: str) -> None:
 
                     # 调用 API
                     start_time = time.time()
-                    response = call_api(full_prompt, timeout=180)
+                    response = call_api(full_prompt, timeout=300)
                     elapsed = time.time() - start_time
 
                     if response:
@@ -1192,11 +1260,23 @@ def render_section(section_name: str) -> None:
                         st.session_state[output_key] = final_output
                         result_placeholder.markdown(final_output)
 
+                        copy_col1, copy_col2 = st.columns([1, 1])
+                        with copy_col1:
+                            st.download_button(
+                                "📋 下载结果.txt",
+                                final_output.encode("utf-8"),
+                                file_name=f"yanyu_{section_name}_result.txt",
+                                mime="text/plain",
+                                key=f"download_txt_{section_name}_{timestamp}"
+                            )
+                        with copy_col2:
+                            st.caption("💡 可直接复制右侧结果文本，或下载为 TXT")
+
                         # 修改说明（单一职责提示）
                         if function == "🤖 去AI味 (Humanizer)":
                             note_text = f"✅ 已针对【{section_name}】完成【{function}】，保持原语种，仅重构语序与节奏。"
                         elif function == "📝 中转英翻译":
-                            note_text = f"✅ 已针对【{section_name}】完成【{function}】，仅进行语种转换，未做润色。"
+                            note_text = f"✅ 已针对【{section_name}】完成【{function}】，已执行跨语种学术翻译并保留术语。"
                         else:
                             note_text = f"✅ 已针对【{section_name}】完成【{function}】，严格按单一职责执行。"
 
@@ -1244,9 +1324,7 @@ def render_section(section_name: str) -> None:
                         st.warning("💡 建议：缩短文本或增加超时时间")
 
 
-for i, tab in enumerate(section_tabs):
-    with tab:
-        render_section(section_names[i])
+render_section(active_section)
 
 # ── 版本时光机 ─────────────────────────────────────────────────────────────
 
@@ -1285,7 +1363,10 @@ if filtered_history:
                 st.caption(f"领域: {entry['domain']} | 语言: {'中文' if entry['input_lang'] == 'zh' else '英文'} | 耗时: {entry['elapsed']}")
             with col2:
                 if st.button("📥 恢复", key=f"restore_{entry['id']}"):
-                    st.session_state.current_input = entry['input']
+                    st.session_state.active_section = entry['section']
+                    target_input_key = f"input_{entry['section']}"
+                    st.session_state[target_input_key] = entry['input']
+                    st.session_state.pending_import_text = ""
                     st.rerun()
             with col3:
                 if st.button("🗑️", key=f"delete_{entry['id']}"):
