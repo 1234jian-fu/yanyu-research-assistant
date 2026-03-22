@@ -16,5 +16,6 @@ ENV/
 *.log
 .DS_Store
 .claude/
+.streamlit/secrets.toml
 output/
 outputs/

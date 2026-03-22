@@ -7,6 +7,9 @@ streamlit>=1.28.0
 # Claude API SDK
 anthropic>=0.39.0
 
+# HTTP 请求
+requests>=2.31.0
+
 # PDF 处理
 pymupdf>=1.24.0
 

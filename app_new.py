@@ -7,7 +7,9 @@ import os
 import re
 import time
 import json
+import base64
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from copy import deepcopy
 from datetime import datetime
 from io import BytesIO
@@ -16,6 +18,7 @@ from typing import Dict, List, Tuple
 
 import anthropic
 import fitz  # pymupdf
+import requests
 import streamlit as st
 import streamlit.components.v1 as components
 from docx import Document
@@ -37,8 +40,13 @@ CLAUDE_API_KEY = os.getenv("ANTHROPIC_AUTH_TOKEN", "").strip()
 CLAUDE_BASE_URL = os.getenv("ANTHROPIC_BASE_URL", "https://aiapi.aixia.tech").rstrip("/")
 CLAUDE_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-opus-4-6")
 
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+GEMINI_BASE_URL = os.getenv("GEMINI_BASE_URL", "https://new.lemonapi.site").rstrip("/")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-image-preview")
+
 WRITING_PAGE = "✍️ 论文写作"
 FORMATTING_PAGE = "📐 格式对齐"
+VIZ_PAGE = "🎨 视觉实验室"
 
 CONFIG = {
     "sections": {
@@ -529,6 +537,56 @@ BUILTIN_LOCAL_SKILLS = CONFIG["builtin_local_skills"]
 UI_CONFIG = CONFIG["ui"]
 MODIFICATION_FUNCTIONS = {"📋 Redlining修订", "✨ 表达润色", "🤖 去AI味 (Humanizer)", "🎯 精修模式"}
 SHADOW_FUNCTIONS = {"✍️ 逐段起草", "💡 研究想法构思", "📄 节节头脑风暴", "✍️ 影子写作"}
+VIZ_SCENE_PROMPTS = {
+    "机理示意图": "show the core scientific mechanism, structural relationships, interaction pathways, key local zoom-ins, and cause-effect logic",
+    "结构表征图": "focus on morphology, layered architecture, porosity, interfaces, crystallographic or nanoscale structural features",
+    "合成流程图": "show a step-by-step synthesis or fabrication workflow with clear transitions between precursors, intermediates, and final products",
+    "性能对比图解": "highlight comparative advantages, structure-property relationships, and visual evidence supporting performance claims",
+    "界面反应图": "emphasize interface structure, interfacial reactions, boundary layers, and coupled transport or conversion processes",
+    "传输路径图": "emphasize ion, electron, heat, mass, or charge transport pathways with directional clarity",
+    "实验流程图": "show instruments, process stages, sample preparation, testing order, and workflow logic clearly",
+    "逻辑框架图": "present conceptual nodes, relationships, hierarchy, and scientific reasoning in a structured visual map",
+}
+VIZ_STYLE_PROMPTS = {
+    "科研 3D 渲染": "scientific 3D rendering, realistic material texture, layered depth, polished academic illustration",
+    "BioRender 风格": "clean biomedical-style schematic, crisp icons, simplified but professional scientific composition",
+    "Nature 图形摘要风格": "high-end journal graphical abstract style, concise layout, premium composition, strong clarity",
+    "简约矢量风格": "minimal vector scientific illustration, clean edges, reduced clutter, publication-ready simplicity",
+    "扁平化信息图风格": "flat infographic style, clear hierarchy, simplified geometry, explanatory visual balance",
+    "深色高级感风格": "dark premium scientific visual style, cinematic contrast, glowing highlights, elegant composition",
+    "高对比演示风格": "presentation-oriented, high contrast, visually striking, immediately readable on slides",
+}
+VIZ_DEFAULT_STATE = {
+    "material_name": "",
+    "component_tags_text": "",
+    "component_tags": [],
+    "usage": "论文主图",
+    "scene": "机理示意图",
+    "style": "科研 3D 渲染",
+    "emphasis_points_text": "",
+    "structure_notes": "",
+    "description": "",
+    "label_mode": "无文字版",
+    "label_language": "中文",
+    "info_density": "中",
+    "aspect_ratio": "1:1",
+    "logic_summary": "",
+    "base_prompt": "",
+    "prompt_with_labels": "",
+    "prompt_without_labels": "",
+    "compact_prompt": "",
+    "expanded_prompt": "",
+    "current_image_url": "",
+    "current_image_bytes": b"",
+    "current_result_id": None,
+    "current_parent_id": None,
+    "iteration_instruction": "",
+    "history": [],
+    "active_history_id": None,
+    "generation_counter": 0,
+    "is_generating": False,
+    "last_error": "",
+}
 
 DEFAULT_STATES = {
     "engine_mode": WRITING_PAGE,
@@ -554,6 +612,7 @@ DEFAULT_STATES = {
     "format_audit_rows": [],
     "format_audited_docx_bytes": b"",
     "format_audited_docx_name": "",
+    "viz_lab": deepcopy(VIZ_DEFAULT_STATE),
 }
 
 for key, default in DEFAULT_STATES.items():
@@ -616,6 +675,245 @@ def init_writing_state() -> None:
         st.session_state.setdefault(writing_output_key(section), "")
         st.session_state.setdefault(writing_note_key(section), "")
         st.session_state.setdefault(writing_term_count_key(section), 0)
+
+
+def init_viz_state() -> dict:
+    current = st.session_state.get("viz_lab")
+    if not isinstance(current, dict):
+        current = deepcopy(VIZ_DEFAULT_STATE)
+        st.session_state["viz_lab"] = current
+    for key, default in VIZ_DEFAULT_STATE.items():
+        current.setdefault(key, deepcopy(default))
+    return current
+
+
+def parse_tag_text(raw_text: str) -> List[str]:
+    parts = re.split(r"[\n,;，；]+", raw_text or "")
+    merged: List[str] = []
+    for part in parts:
+        item = part.strip()
+        if item and item not in merged:
+            merged.append(item)
+    return merged
+
+
+def get_viz_components(viz_state: dict) -> List[str]:
+    explicit = list(viz_state.get("component_tags", []))
+    typed = parse_tag_text(viz_state.get("component_tags_text", ""))
+    merged: List[str] = []
+    for item in explicit + typed:
+        if item not in merged:
+            merged.append(item)
+    viz_state["component_tags"] = merged
+    return merged
+
+
+def build_viz_logic_summary(viz_state: dict) -> str:
+    material_text = viz_state.get("material_name", "").strip() or "未指定材料"
+    components = get_viz_components(viz_state)
+    components_text = "、".join(components) if components else "未指定组成"
+    usage = viz_state.get("usage", "未指定用途")
+    scene = viz_state.get("scene", "未指定场景")
+    style = viz_state.get("style", "未指定风格")
+    label_mode = viz_state.get("label_mode", "未指定标注模式")
+    return f"材料：{material_text}｜组成：{components_text}｜用途：{usage}｜场景：{scene}｜风格：{style}｜标注：{label_mode}"
+
+
+def build_viz_prompt_bundle(viz_state: dict) -> dict:
+    material_text = viz_state.get("material_name", "").strip() or "unspecified material system"
+    components = get_viz_components(viz_state)
+    components_text = ", ".join(components) if components else "key material components"
+    scene_text = VIZ_SCENE_PROMPTS.get(viz_state.get("scene", ""), viz_state.get("scene", "scientific illustration"))
+    style_text = VIZ_STYLE_PROMPTS.get(viz_state.get("style", ""), viz_state.get("style", "academic illustration"))
+    usage_text = viz_state.get("usage", "论文主图")
+    emphasis_text = viz_state.get("emphasis_points_text", "").strip() or "highlight the main scientific message clearly"
+    structure_notes = viz_state.get("structure_notes", "").strip() or "maintain accurate structural relationships"
+    description_text = viz_state.get("description", "").strip() or "show the target scientific content clearly"
+    info_density = viz_state.get("info_density", "中")
+    aspect_ratio = viz_state.get("aspect_ratio", "1:1")
+    label_language = "Chinese" if viz_state.get("label_language") == "中文" else "English"
+
+    base_prompt = (
+        f"{style_text}. "
+        f"Material: {material_text}. "
+        f"Key components: {components_text}. "
+        f"Scene goal: {scene_text}. "
+        f"Usage context: {usage_text}. "
+        f"Emphasis points: {emphasis_text}. "
+        f"Structural notes: {structure_notes}. "
+        f"Description: {description_text}. "
+        f"Information density: {info_density}. "
+        f"Aspect ratio: {aspect_ratio}. "
+        "High resolution, academic journal quality."
+    )
+
+    prompt_with_labels = (
+        f"{base_prompt} "
+        f"Add concise {label_language} labels only where necessary. "
+        "Labels must be publication-style, clean, minimal, and embedded naturally into the figure."
+    )
+    prompt_without_labels = (
+        f"{base_prompt} "
+        "Do not include any text labels, titles, legends, letters, or annotations in the image."
+    )
+    compact_prompt = f"{style_text}; {material_text}; {components_text}; {scene_text}; {description_text}; academic journal quality"
+    expanded_prompt = (
+        f"{prompt_with_labels if viz_state.get('label_mode') == '有文字版' else prompt_without_labels} "
+        "Ensure strong composition hierarchy, clear scientific storytelling, clean background, accurate material relationships, "
+        "professional color usage, and visual focus on the core scientific message."
+    )
+    return {
+        "base_prompt": base_prompt,
+        "prompt_with_labels": prompt_with_labels,
+        "prompt_without_labels": prompt_without_labels,
+        "compact_prompt": compact_prompt,
+        "expanded_prompt": expanded_prompt,
+    }
+
+
+def build_viz_iteration_prompt(viz_state: dict) -> str:
+    prompt_seed = viz_state.get("expanded_prompt") or viz_state.get("base_prompt")
+    instruction = viz_state.get("iteration_instruction", "").strip()
+    return (
+        f"{prompt_seed}\n\n"
+        "This is an iterative refinement based on the current previously generated figure. "
+        "Keep the overall scientific subject and composition continuity unless the modification explicitly requests otherwise.\n\n"
+        f"Modification instruction:\n{instruction}"
+    ).strip()
+
+
+def get_viz_image_bytes(image_url: str) -> bytes | None:
+    if not image_url:
+        return None
+    if image_url.startswith("data:"):
+        try:
+            _, base64_data = image_url.split(",", 1)
+            return base64.b64decode(base64_data)
+        except Exception:
+            return None
+    try:
+        resp = requests.get(image_url, timeout=30)
+        resp.raise_for_status()
+        return resp.content
+    except Exception:
+        return None
+
+
+def call_gemini_image(prompt: str, aspect_ratio: str = "1:1") -> tuple[str, bytes | None]:
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "responseModalities": ["TEXT", "IMAGE"],
+            "imageConfig": {
+                "aspectRatio": aspect_ratio,
+                "imageSize": "1K",
+            },
+        },
+    }
+    headers = {
+        "Content-Type": "application/json",
+        "X-goog-api-key": GEMINI_API_KEY,
+    }
+    resp = requests.post(
+        f"{GEMINI_BASE_URL}/v1beta/models/{GEMINI_MODEL}:generateContent",
+        json=payload,
+        headers=headers,
+        timeout=90,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    candidates = data.get("candidates") or []
+    if not candidates:
+        raise ValueError(f"Unexpected Gemini response: {json.dumps(data, ensure_ascii=False)[:500]}")
+    parts = ((candidates[0].get("content") or {}).get("parts")) or []
+    for part in parts:
+        inline_data = part.get("inlineData") or part.get("inline_data")
+        if not inline_data:
+            continue
+        b64_data = inline_data.get("data", "")
+        if not b64_data:
+            continue
+        image_bytes = base64.b64decode(b64_data)
+        image_url = f"data:{inline_data.get('mimeType', 'image/png')};base64,{b64_data}"
+        return image_url, image_bytes
+    raise ValueError(f"Gemini response contained no image parts: {json.dumps(data, ensure_ascii=False)[:500]}")
+
+
+def generate_viz_image(prompt: str, generation_index: int, aspect_ratio: str) -> dict:
+    try:
+        image_url, image_bytes = call_gemini_image(prompt, aspect_ratio=aspect_ratio)
+        return {
+            "id": f"viz-{generation_index}",
+            "prompt": prompt,
+            "image_url": image_url,
+            "image_bytes": image_bytes,
+            "error": "",
+        }
+    except Exception as exc:
+        return {
+            "id": f"viz-{generation_index}",
+            "prompt": prompt,
+            "image_url": "",
+            "image_bytes": None,
+            "error": str(exc),
+        }
+
+
+def append_viz_history_entry(viz_state: dict, prompt_used: str, iteration_instruction: str = "") -> None:
+    if not viz_state.get("current_image_url"):
+        return
+    entry_id = viz_state.get("current_result_id") or f"viz-{viz_state.get('generation_counter', 0)}"
+    parent_id = viz_state.get("current_parent_id")
+    viz_state["history"].insert(0, {
+        "id": entry_id,
+        "parent_id": parent_id,
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "material_name": viz_state.get("material_name", ""),
+        "component_tags_text": viz_state.get("component_tags_text", ""),
+        "component_tags": list(get_viz_components(viz_state)),
+        "usage": viz_state.get("usage", ""),
+        "scene": viz_state.get("scene", ""),
+        "style": viz_state.get("style", ""),
+        "emphasis_points_text": viz_state.get("emphasis_points_text", ""),
+        "structure_notes": viz_state.get("structure_notes", ""),
+        "description": viz_state.get("description", ""),
+        "label_mode": viz_state.get("label_mode", ""),
+        "label_language": viz_state.get("label_language", ""),
+        "info_density": viz_state.get("info_density", ""),
+        "aspect_ratio": viz_state.get("aspect_ratio", "1:1"),
+        "logic_summary": viz_state.get("logic_summary", ""),
+        "base_prompt": viz_state.get("base_prompt", ""),
+        "prompt_with_labels": viz_state.get("prompt_with_labels", ""),
+        "prompt_without_labels": viz_state.get("prompt_without_labels", ""),
+        "compact_prompt": viz_state.get("compact_prompt", ""),
+        "expanded_prompt": viz_state.get("expanded_prompt", ""),
+        "image_url": viz_state.get("current_image_url", ""),
+        "image_bytes": viz_state.get("current_image_bytes", b""),
+        "iteration_instruction": iteration_instruction,
+        "prompt_used": prompt_used,
+    })
+    viz_state["history"] = viz_state["history"][:30]
+    viz_state["active_history_id"] = entry_id
+
+
+def restore_viz_history_entry(viz_state: dict, entry_id: str) -> None:
+    for entry in viz_state.get("history", []):
+        if entry.get("id") != entry_id:
+            continue
+        for key in [
+            "material_name", "component_tags_text", "usage", "scene", "style", "emphasis_points_text", "structure_notes",
+            "description", "label_mode", "label_language", "info_density", "aspect_ratio", "logic_summary", "base_prompt",
+            "prompt_with_labels", "prompt_without_labels", "compact_prompt", "expanded_prompt"
+        ]:
+            viz_state[key] = entry.get(key, deepcopy(VIZ_DEFAULT_STATE.get(key)))
+        viz_state["component_tags"] = list(entry.get("component_tags", []))
+        viz_state["current_result_id"] = entry.get("id")
+        viz_state["current_parent_id"] = entry.get("parent_id")
+        viz_state["current_image_url"] = entry.get("image_url", "")
+        viz_state["current_image_bytes"] = entry.get("image_bytes", b"")
+        viz_state["iteration_instruction"] = entry.get("iteration_instruction", "")
+        viz_state["active_history_id"] = entry.get("id")
+        return
 
 
 FORMAT_RULESET_LIBRARY = {
@@ -1714,7 +2012,7 @@ def get_function_nav_index(current_function: str) -> int:
 
 def render_writing_engine_sidebar() -> List[str]:
     render_sidebar_brand()
-    st.sidebar.radio("核心引擎", [WRITING_PAGE, FORMATTING_PAGE], key="engine_mode")
+    st.sidebar.radio("核心引擎", [WRITING_PAGE, FORMATTING_PAGE, VIZ_PAGE], key="engine_mode")
     st.sidebar.selectbox("统一功能栏", options=FUNCTION_NAV, index=get_function_nav_index(st.session_state.get("writing_function", list(FUNCTION_MATRIX.keys())[0])), format_func=lambda item: item["label"], key="writing_function_selector")
     st.session_state.writing_function = st.session_state["writing_function_selector"]["value"]
     st.sidebar.selectbox("🔬 学科大脑", DOMAIN_ORDER, key="writing_domain_selector")
@@ -1851,7 +2149,7 @@ def render_history_panel() -> None:
 
 def render_formatting_engine_sidebar() -> None:
     render_sidebar_brand()
-    st.sidebar.radio("核心引擎", [WRITING_PAGE, FORMATTING_PAGE], key="engine_mode")
+    st.sidebar.radio("核心引擎", [WRITING_PAGE, FORMATTING_PAGE, VIZ_PAGE], key="engine_mode")
     st.sidebar.selectbox("🔬 学科大脑", DOMAIN_ORDER, key="format_formatting_domain_selector")
     st.session_state.formatting_domain = st.session_state["format_formatting_domain_selector"]
     st.sidebar.selectbox(
@@ -1862,6 +2160,271 @@ def render_formatting_engine_sidebar() -> None:
     )
     render_sidebar_panel("格式对齐", "排版引擎与写作引擎状态完全隔离，只保留确定性审计与自动修复。")
     st.sidebar.caption("规则来源参考 thesis-skills 的 check/fix 闭环，但这里直接面向 Word 文档执行。")
+
+
+def render_viz_engine_sidebar() -> None:
+    viz_state = init_viz_state()
+    viz_state["logic_summary"] = build_viz_logic_summary(viz_state)
+    render_sidebar_brand()
+    st.sidebar.radio("核心引擎", [WRITING_PAGE, FORMATTING_PAGE, VIZ_PAGE], key="engine_mode")
+    render_sidebar_panel("视觉实验室", "材料科研单图生成、精修与版本迭代全部收敛到 viz_lab 命名空间。")
+    st.sidebar.caption(f"绘图模型：{GEMINI_MODEL}")
+    st.sidebar.caption("Claude 本地负责逻辑与代码，Gemini 仅负责图像生成。")
+    st.sidebar.caption("当前配置摘要")
+    st.sidebar.code(viz_state["logic_summary"], language=None)
+
+
+def render_viz_history_panel(viz_state: dict) -> None:
+    if not viz_state.get("history"):
+        st.info("📭 暂无绘图历史")
+        return
+    for entry in viz_state["history"]:
+        title = f"{entry['timestamp']} · {entry['scene']} · {entry['style']}"
+        with st.expander(title, expanded=False):
+            st.caption(f"链路: {entry.get('parent_id') or 'ROOT'} → {entry['id']}")
+            st.caption(entry.get("description", "")[:180] or "无描述")
+            if entry.get("image_url"):
+                st.image(entry["image_url"], use_container_width=True)
+            c1, c2 = st.columns([1, 1])
+            with c1:
+                if st.button("📥 恢复此版本", key=f"viz_restore_{entry['id']}", use_container_width=True):
+                    restore_viz_history_entry(viz_state, entry["id"])
+                    st.rerun()
+            with c2:
+                image_bytes = entry.get("image_bytes") or get_viz_image_bytes(entry.get("image_url", ""))
+                if image_bytes:
+                    st.download_button(
+                        "⬇️ 下载当前图",
+                        image_bytes,
+                        file_name=f"xueyan_viz_{entry['id']}.png",
+                        mime="image/png",
+                        key=f"viz_hist_dl_{entry['id']}",
+                        use_container_width=True,
+                    )
+
+
+def render_viz_engine() -> None:
+    viz_state = init_viz_state()
+    render_viz_engine_sidebar()
+
+    st.markdown(
+        """
+<div class="workbench-card compact">
+    <div class="workbench-title">
+        <div>
+            <h3>视觉实验室工作台</h3>
+            <p>材料科研单图生成 → Prompt 控制台 → 基于当前结果继续迭代。</p>
+        </div>
+        <span class="workbench-chip">Visualization Lab</span>
+    </div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
+    left_col, right_col = st.columns([1, 2], gap="large")
+
+    with left_col:
+        with st.expander("① 材料基础", expanded=True):
+            viz_state["material_name"] = st.text_input(
+                "材料名称",
+                value=viz_state.get("material_name", ""),
+                placeholder="如：MoS2 / 石墨烯复合材料 / 多孔氧化物",
+                key="viz_material_name",
+            )
+            viz_state["component_tags_text"] = st.text_area(
+                "物质组成 / 关键组分",
+                value=viz_state.get("component_tags_text", ""),
+                height=90,
+                placeholder="每行一个，或用逗号分隔，例如：MoS2 纳米片, 石墨烯, 空位缺陷, 金属纳米颗粒",
+                key="viz_component_tags_text",
+            )
+            viz_state["structure_notes"] = st.text_area(
+                "结构补充说明",
+                value=viz_state.get("structure_notes", ""),
+                height=80,
+                placeholder="例如：核壳结构 / 多孔骨架 / 层状堆叠 / 表面包覆 / 界面异质结",
+                key="viz_structure_notes",
+            )
+
+        with st.expander("② 场景与用途", expanded=True):
+            usage_options = ["论文主图", "论文 TOC 图", "汇报展示", "基金申请", "教学示意", "社媒科普"]
+            viz_state["usage"] = st.selectbox(
+                "图像用途",
+                usage_options,
+                index=usage_options.index(viz_state.get("usage", "论文主图")) if viz_state.get("usage", "论文主图") in usage_options else 0,
+                key="viz_usage",
+            )
+            scene_options = list(VIZ_SCENE_PROMPTS.keys())
+            viz_state["scene"] = st.selectbox(
+                "场景类型",
+                scene_options,
+                index=scene_options.index(viz_state.get("scene", scene_options[0])) if viz_state.get("scene", scene_options[0]) in scene_options else 0,
+                key="viz_scene",
+            )
+            viz_state["emphasis_points_text"] = st.text_area(
+                "强调重点",
+                value=viz_state.get("emphasis_points_text", ""),
+                height=80,
+                placeholder="例如：突出离子扩散路径、界面反应区域、层间结构变化、局部放大区域",
+                key="viz_emphasis_points_text",
+            )
+
+        with st.expander("③ 风格与表达", expanded=True):
+            style_options = list(VIZ_STYLE_PROMPTS.keys())
+            viz_state["style"] = st.selectbox(
+                "视觉风格",
+                style_options,
+                index=style_options.index(viz_state.get("style", style_options[0])) if viz_state.get("style", style_options[0]) in style_options else 0,
+                key="viz_style",
+            )
+            col1, col2 = st.columns(2)
+            with col1:
+                viz_state["label_mode"] = st.radio(
+                    "标注模式",
+                    ["无文字版", "有文字版"],
+                    horizontal=True,
+                    index=0 if viz_state.get("label_mode", "无文字版") == "无文字版" else 1,
+                    key="viz_label_mode",
+                )
+            with col2:
+                viz_state["label_language"] = st.radio(
+                    "标签语言",
+                    ["中文", "英文"],
+                    horizontal=True,
+                    index=0 if viz_state.get("label_language", "中文") == "中文" else 1,
+                    key="viz_label_language",
+                )
+            col3, col4 = st.columns(2)
+            with col3:
+                density_options = ["低", "中", "高"]
+                viz_state["info_density"] = st.selectbox(
+                    "信息密度",
+                    density_options,
+                    index=density_options.index(viz_state.get("info_density", "中")) if viz_state.get("info_density", "中") in density_options else 1,
+                    key="viz_info_density",
+                )
+            with col4:
+                ratio_options = ["1:1", "4:3", "3:2", "16:9", "9:16"]
+                viz_state["aspect_ratio"] = st.selectbox(
+                    "输出比例",
+                    ratio_options,
+                    index=ratio_options.index(viz_state.get("aspect_ratio", "1:1")) if viz_state.get("aspect_ratio", "1:1") in ratio_options else 0,
+                    key="viz_aspect_ratio",
+                )
+
+        with st.expander("④ 自动逻辑摘要", expanded=True):
+            viz_state["logic_summary"] = build_viz_logic_summary(viz_state)
+            st.info(viz_state["logic_summary"] or "填写左侧信息后，这里会自动生成逻辑摘要。")
+
+    with right_col:
+        st.markdown("### 图像描述")
+        viz_state["description"] = st.text_area(
+            "请描述你想表达的科学内容",
+            value=viz_state.get("description", ""),
+            height=180,
+            placeholder="例如：展示层状材料中离子在层间扩散，并突出表面异质结对反应动力学的促进作用。",
+            key="viz_description",
+        )
+
+        prompt_bundle = build_viz_prompt_bundle(viz_state)
+        viz_state.update(prompt_bundle)
+
+        st.markdown("### Prompt 控制台")
+        tab1, tab2, tab3, tab4 = st.tabs(["当前 Prompt", "无文字版", "有文字版", "扩展版"])
+        with tab1:
+            st.code(viz_state["base_prompt"], language="text")
+        with tab2:
+            st.code(viz_state["prompt_without_labels"], language="text")
+        with tab3:
+            st.code(viz_state["prompt_with_labels"], language="text")
+        with tab4:
+            st.code(viz_state["expanded_prompt"], language="text")
+
+        action_col1, action_col2, action_col3 = st.columns([1, 1, 2])
+        with action_col1:
+            generate_clicked = st.button("生成图片", type="primary", use_container_width=True, key="viz_generate")
+        with action_col2:
+            regenerate_clicked = st.button("重新生成", use_container_width=True, key="viz_regenerate")
+        with action_col3:
+            st.caption("默认生成单张结果，后续围绕当前结果继续迭代。")
+
+        if generate_clicked or regenerate_clicked:
+            if not viz_state["description"].strip():
+                st.warning("请先填写图像描述。")
+            elif not GEMINI_API_KEY:
+                st.error("未配置 GEMINI_API_KEY。")
+            else:
+                prompt_to_use = viz_state["prompt_with_labels"] if viz_state.get("label_mode") == "有文字版" else viz_state["prompt_without_labels"]
+                viz_state["base_prompt"] = prompt_to_use
+                viz_state["generation_counter"] += 1
+                viz_state["current_parent_id"] = None if generate_clicked else viz_state.get("current_parent_id")
+                with st.spinner("正在生成图片..."):
+                    result = generate_viz_image(prompt_to_use, viz_state["generation_counter"], viz_state.get("aspect_ratio", "1:1"))
+                if result.get("error"):
+                    viz_state["last_error"] = result["error"]
+                    st.error(result["error"])
+                else:
+                    viz_state["current_result_id"] = result["id"]
+                    viz_state["current_image_url"] = result["image_url"]
+                    viz_state["current_image_bytes"] = result.get("image_bytes") or b""
+                    viz_state["last_error"] = ""
+                    append_viz_history_entry(viz_state, prompt_to_use)
+
+        st.markdown("### 当前结果")
+        if viz_state.get("current_image_url"):
+            st.image(viz_state["current_image_url"], use_container_width=True)
+            dcol1, dcol2 = st.columns([1, 1])
+            with dcol1:
+                st.download_button(
+                    "下载当前图片",
+                    data=viz_state.get("current_image_bytes") or get_viz_image_bytes(viz_state.get("current_image_url", "")) or b"",
+                    file_name=f"viz-{viz_state.get('current_result_id') or 'current'}.png",
+                    mime="image/png",
+                    use_container_width=True,
+                    key="viz_current_download",
+                )
+            with dcol2:
+                st.success("当前结果已就绪，可直接继续修改。")
+        else:
+            st.info("尚未生成图片。填写左侧参数和描述后，点击“生成图片”。")
+
+        st.markdown("### 继续修改当前结果")
+        viz_state["iteration_instruction"] = st.text_area(
+            "修改指令",
+            value=viz_state.get("iteration_instruction", ""),
+            height=90,
+            placeholder="例如：把主结构改为蓝绿色半透明；增加一个局部放大框；把箭头改为更清晰的发光路径。",
+            key="viz_iteration_instruction",
+        )
+        apply_edit_clicked = st.button("应用修改", use_container_width=True, key="viz_apply_edit")
+        if apply_edit_clicked:
+            if not viz_state.get("current_image_url"):
+                st.warning("请先生成当前图片。")
+            elif not viz_state["iteration_instruction"].strip():
+                st.warning("请先填写修改指令。")
+            elif not GEMINI_API_KEY:
+                st.error("未配置 GEMINI_API_KEY。")
+            else:
+                parent_id = viz_state.get("current_result_id")
+                iteration_prompt = build_viz_iteration_prompt(viz_state)
+                viz_state["generation_counter"] += 1
+                with st.spinner("正在基于当前结果生成新版本..."):
+                    result = generate_viz_image(iteration_prompt, viz_state["generation_counter"], viz_state.get("aspect_ratio", "1:1"))
+                if result.get("error"):
+                    viz_state["last_error"] = result["error"]
+                    st.error(result["error"])
+                else:
+                    viz_state["base_prompt"] = iteration_prompt
+                    viz_state["current_parent_id"] = parent_id
+                    viz_state["current_result_id"] = result["id"]
+                    viz_state["current_image_url"] = result["image_url"]
+                    viz_state["current_image_bytes"] = result.get("image_bytes") or b""
+                    viz_state["last_error"] = ""
+                    append_viz_history_entry(viz_state, iteration_prompt, viz_state["iteration_instruction"])
+
+        with st.expander("版本历史", expanded=False):
+            render_viz_history_panel(viz_state)
 
 
 def render_formatting_engine() -> None:
@@ -2056,15 +2619,17 @@ def main() -> None:
 
     if st.session_state.engine_mode == WRITING_PAGE:
         render_writing_engine()
-    else:
+    elif st.session_state.engine_mode == FORMATTING_PAGE:
         render_formatting_engine()
+    else:
+        render_viz_engine()
 
     st.markdown(
         """
 ---
 <div style="text-align: center; color: #64748b; font-size: 0.8rem; padding: 2rem 0;">
     <p><strong>🧪 学研·工科科研助手 v4.0</strong></p>
-    <p>双引擎架构 · 写作协作 OS · 确定性格式对齐 · Hugging Face 就绪</p>
+    <p>三引擎架构 · 写作协作 OS · 确定性格式对齐 · 视觉实验室</p>
 </div>
 """,
         unsafe_allow_html=True,
