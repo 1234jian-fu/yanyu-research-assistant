@@ -1,59 +1,69 @@
 """
-学研·工科科研助手 v4.0 (YanYu OS)
-15+功能矩阵 · 板块锚定 · 零篡位执行 · 影子合著者 · 语言基因深度提取
+学研·工科科研助手 v4.0 (Xueyan OS)
+双引擎架构：论文内容写作 + 确定性格式对齐
 """
 
 import os
 import re
 import time
+from collections import Counter
+from copy import deepcopy
 from datetime import datetime
 from io import BytesIO
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional
-from collections import Counter
-import json
+from typing import Dict, List, Tuple
 
 import anthropic
 import fitz  # pymupdf
 import streamlit as st
 from docx import Document
-from docx.shared import Pt, RGBColor
-from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
-from docx.oxml.shared import OxmlElement
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from docx.enum.section import WD_SECTION
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
+from docx.shared import Cm, Pt, RGBColor
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 # ── Configuration ────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="学研·工科科研助手 v3.1",
+    page_title="学研·工科科研助手 v4.0",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# Claude API 配置 (使用 Claude Code 相同接口)
 CLAUDE_API_KEY = os.getenv("ANTHROPIC_AUTH_TOKEN", "").strip()
 CLAUDE_BASE_URL = os.getenv("ANTHROPIC_BASE_URL", "https://aiapi.aixia.tech").rstrip("/")
-CLAUDE_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
+CLAUDE_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-opus-4-6")
 
-# ── Session State ───────────────────────────────────────────────────────────
+WRITING_PAGE = "✍️ 论文内容写作"
+FORMATTING_PAGE = "📏 确定性格式对齐"
+SECTION_NAMES = ["摘要", "引言", "方法", "结果", "讨论", "结论"]
+MODIFICATION_FUNCTIONS = {"📋 Redlining修订", "✨ 表达润色", "🤖 去AI味 (Humanizer)", "🎯 精修模式"}
+SHADOW_FUNCTIONS = {"✍️ 逐段起草", "💡 研究想法构思", "📄 节节头脑风暴", "✍️ 影子写作"}
+
 DEFAULT_STATES = {
-    "history": [],              # 历史时光机（按板块+功能分类）
-    "reference_docs": {},       # 标杆文献库 {filename: style_analysis}
-    "pending_import_text": "", # 待导入到当前板块的文本
-    "active_section": "摘要",   # 当前激活板块
-    "loaded_skills": False,     # Skills加载状态
+    "engine_mode": WRITING_PAGE,
+    "writing_active_section": "摘要",
+    "writing_history": [],
+    "writing_reference_docs": {},
+    "writing_import_targets": {},
+    "format_guideline_text": "",
+    "format_guideline_summary": "",
+    "format_audit_report": {},
+    "format_fix_options": [],
+    "format_output_docx_bytes": b"",
+    "format_last_filename": "",
 }
 
 for key, default in DEFAULT_STATES.items():
     if key not in st.session_state:
-        st.session_state[key] = default
+        st.session_state[key] = deepcopy(default)
 
 # ── 常量定义 ─────────────────────────────────────────────────────────────────
-
-# 15+ 功能矩阵（单一职责）
 FUNCTION_MATRIX = {
     "📝 中转英翻译": {
-        "description": "执行中英双向学术翻译，允许必要学术化优化",
-        "rules": ["✅ 必须跨语种输出", "❌ 禁止同语输出", "✅ 学术翻译优先"]
+        "description": "执行中英双向精准学术翻译，严格跨语种输出",
+        "rules": ["✅ 必须跨语种输出", "❌ 禁止同语输出", "✅ 工科论文表达"]
     },
     "✨ 表达润色": {
         "description": "提升学术地道性，同语言优化",
@@ -91,6 +101,10 @@ FUNCTION_MATRIX = {
         "description": "将大纲扩充为正式段落",
         "rules": ["✅ 模仿标杆文献", "✅ 保持学术规范"]
     },
+    "✍️ 影子写作": {
+        "description": "优先模仿标杆文献叙事节奏进行起草",
+        "rules": ["✅ 优先模仿标杆文献", "✅ 保持当前语种", "✅ 对齐当前板块"]
+    },
     "🎯 精修模式": {
         "description": "深度精修，达到顶刊水准",
         "rules": ["✅ 模仿标杆文献", "✅ 顶刊标准"]
@@ -113,7 +127,6 @@ FUNCTION_MATRIX = {
     },
 }
 
-# 板块定义
 SECTIONS = {
     "摘要": {"focus": "开门见山，数据支撑", "max_words": 250},
     "引言": {"focus": "背景转折，研究空白", "max_words": 800},
@@ -123,248 +136,182 @@ SECTIONS = {
     "结论": {"focus": "总结贡献，展望未来", "max_words": 300},
 }
 
-# 学科领域与术语硬锁
 DOMAINS = {
     "🔋 能源电池": {
-        "hard_lock": [r'\$Li\+\$', r'\$Na\+\$', 'NCM523', 'NCM622', 'capacity retention', 'intercalation'],
+        "hard_lock": [r"\$Li\^\+\$", r"\$Na\^\+\$", "NCM523", "NCM622", "XRD", "SEM", "capacity retention", "intercalation", "晶格", "应力应变"],
         "focus": "电化学性能"
     },
     "🏗️ 固废/土木": {
-        "hard_lock": ['GGBS', '水化动力学', 'compressive strength', 'C-S-H', 'pozzolanic'],
+        "hard_lock": ["GGBS", "水化动力学", "compressive strength", "C-S-H", "pozzolanic"],
         "focus": "材料性能"
     },
     "🔩 机械/材料": {
-        "hard_lock": ['tensile strength', 'grain boundary', 'dislocation', 'microstructure'],
+        "hard_lock": ["tensile strength", "grain boundary", "dislocation", "microstructure", "XRD", "SEM", "晶格", "应力应变"],
         "focus": "力学性能"
     },
     "🧪 催化/化工": {
-        "hard_lock": ['TOF', 'turnover frequency', 'BET', 'heterogeneous catalysis'],
+        "hard_lock": ["TOF", "turnover frequency", "BET", "heterogeneous catalysis"],
         "focus": "催化性能"
     },
     "🌊 环境工程": {
-        "hard_lock": ['COD', 'BOD', 'MBR', 'activated sludge', 'removal efficiency'],
+        "hard_lock": ["COD", "BOD", "MBR", "activated sludge", "removal efficiency"],
         "focus": "处理效果"
     },
     "📱 电子半导体": {
-        "hard_lock": ['MOSFET', 'bandgap', 'GaN', 'SiC', 'carrier mobility'],
+        "hard_lock": ["MOSFET", "bandgap", "GaN", "SiC", "carrier mobility"],
         "focus": "电学性能"
     },
     "🧬 生物材料": {
-        "hard_lock": ['hydrogel', 'cell adhesion', 'biocompatibility', 'MTT assay'],
+        "hard_lock": ["hydrogel", "cell adhesion", "biocompatibility", "MTT assay"],
         "focus": "生物相容性"
     },
     "🧠 机器学习": {
-        "hard_lock": ['CNN', 'Transformer', 'overfitting', 'gradient descent', 'F1-score'],
+        "hard_lock": ["CNN", "Transformer", "overfitting", "gradient descent", "F1-score"],
         "focus": "模型性能"
     },
     "💻 软件工程": {
-        "hard_lock": ['CI/CD', 'Agile', 'DevOps', 'API', 'microservices'],
+        "hard_lock": ["CI/CD", "Agile", "DevOps", "API", "microservices"],
         "focus": "工程实践"
     },
 }
 
-# ── 深度技能加载系统 ────────────────────────────────────────────────────────
-
 @st.cache_resource
 def load_local_skills() -> Dict[str, str]:
-    """递归加载本地学术库"""
-    skills = {}
+    skills: Dict[str, str] = {}
     base_path = Path("./awesome-ai-research-writing")
-
     if not base_path.exists():
         return skills
-
     for md_file in base_path.rglob("*.md"):
         try:
-            content = md_file.read_text(encoding="utf-8")
-            key = md_file.stem
-            skills[key] = content
-        except:
+            skills[md_file.stem] = md_file.read_text(encoding="utf-8")
+        except Exception:
             continue
-
     return skills
 
 LOCAL_SKILLS = load_local_skills()
+SKILL_GROUPS = {
+    "humanizer": HUMANIZER_RULES if "HUMANIZER_RULES" in globals() else "",
+}
 
-# Humanizer 核心规则（硬编码注入）
 HUMANIZER_RULES = """
 ## Humanizer 核心规则（零篡位）
-
-### AI 痕迹识别清单
-1. **过度强调意义**: "具有...意义", "crucial", "critical", "important", "significant"
-2. **AI 常用词**: "delve", "landscape", "realm", "leverage", "underscore", "utilize"
-3. **破折号滥用**: 解释性插入语过多（—which, —that）
-4. **三点式堆砌**: A, B, and C 结构过多
-5. **促销腔**: "exciting", "promising", "novel", "groundbreaking"
-6. **空洞-ing分析**: "indicating", "suggesting", "implying" 滥用
-7. **陈词滥调**: "综上所述", "总而言之", "in conclusion", "it is worth noting that"
-
-### 人味注入策略
-- 承认不确定性: "suggest", "may", "potentially", "appears to"
-- 节奏变化: 长短句交替，避免单调
-- 自然过渡: 删除机械连接词（Firstly, Secondly, Furthermore）
-- 简洁动词: show, use, find, make (而非 demonstrate, utilize, discover, fabricate)
-- 保留作者语气: 不额外拔高结论，不制造不存在的贡献感
-
-### 语序优化原则
-- **中文输入**: 优化中文语序，保持中文输出
-- **英文输入**: 增强英文节奏感，保持英文输出
-- **零翻译**: 严格禁止语种转换
+- 清理 AI 套话：综上所述、总而言之、in conclusion、it is worth noting that。
+- 清理 AI 高危词：delve, landscape, leverage, underscore, utilize。
+- 保留原语种，禁止翻译。
+- 用长短句变化制造呼吸感，但不新增论点。
+- 不夸大贡献，不制造不存在的创新性语气。
 """
 
 TRANSLATION_SKILL_RULES = """
-## Translation Mastery（学术翻译优先）
-- 翻译板块必须执行跨语种转换，严禁同语输出。
-- 中译英时允许必要的学术化表达优化，使输出符合工科论文叙事习惯。
-- 自动补全英文冠词、时态与被动结构，使论述更自然。
-- “改善了/优化了/缓解了/提升了”优先根据上下文映射为 enhanced, optimized, alleviated, improved 等表达。
-- 英译中时消除翻译腔，输出自然、规范、可直接用于学术写作的中文。
-- LaTeX、化学式、材料名、缩写和关键术语必须保持准确。
+## Translation Mastery（精准跨语种）
+- 必须执行跨语种转换，严禁同语输出。
+- 中译英：使用工科学术表达，补全冠词、时态、被动结构。
+- 英译中：去翻译腔，输出自然、凝练、可直接入文的中文。
+- 保留 LaTeX、化学式、缩写、材料名、术语格式。
 """
 
 RESULTS_SKILL_RULES = """
 ## Results 专项写作协议
-- 结果板块优先突出趋势分析、组间对比、异常点解释与图表引用。
-- 遇到实验数据时，优先说明 increase/decrease、higher/lower、plateau、fluctuation 等关系，而非空泛评价。
-- 自动保留并正确处理 LaTeX 公式、化学式、材料名和单位。
-- 对机器学习结果补充 benchmark、ablation、statistical significance、error bar 等意识。
-- 对工科实验结果保持客观，避免把结论写成宣传语。
+- 结果板块优先写趋势、对比、异常点解释、图表引用。
+- 遇到实验数据时，优先明确 increase/decrease、higher/lower、plateau、fluctuation 等关系。
+- 自动保留 LaTeX、化学式、材料名和单位。
+- 对工科实验结果保持客观，避免宣传腔。
 """
 
 DOCX_SKILL_RULES = """
 ## DOCX / Redlining 协议
 - Word 导出需保留板块、功能、领域和时间元信息。
-- Redlining 用于展示修改痕迹，不改变单一职责边界。
-- 仅在修改类功能下提供 Redlining 导出，便于对照原文与修订稿。
+- Redlining 仅用于展示修订痕迹，不改变功能职责边界。
 """
 
-# ML Paper Writing Checklist（仅用于 Results 板块验证）
 ML_CHECKLIST = """
-## ML Paper Writing Checklist (仅 Results 板块)
-
-### 引用验证
-- [ ] 引用格式统一（NeurIPS/ICML 格式）
-- [ ] 所有方法引用有明确出处
-- [ ] 基线模型正确引用
-
-### 图表规范
-- [ ] 色盲友好配色（viridis, magma）
-- [ ] 坐标轴标签清晰
-- [ ] 图例位置合理
-- [ ] 误差线标注
-
-### 数据完整性
-- [ ] 超参数表完整
-- [ ] 实验设置可复现
-- [ ] 统计显著性标注
+## ML Paper Writing Checklist
+- 引用格式统一
+- 所有方法引用有明确出处
+- 基线模型正确引用
+- 图表配色、图例、误差线清晰
+- 超参数表与实验设置可复现
+- 统计显著性标注完整
 """
 
+# ── 工具函数 ─────────────────────────────────────────────────────────────────
+def writing_input_key(section: str) -> str:
+    return f"writing_input_{section}"
 
-# ── 术语硬锁保护系统 v2.0 ────────────────────────────────────────────────────────
+
+def writing_output_key(section: str) -> str:
+    return f"writing_output_{section}"
+
+
+def writing_note_key(section: str) -> str:
+    return f"writing_note_{section}"
+
+
+def init_writing_state() -> None:
+    for section in SECTION_NAMES:
+        st.session_state.setdefault(writing_input_key(section), "")
+        st.session_state.setdefault(writing_output_key(section), "")
+        st.session_state.setdefault(writing_note_key(section), "")
+
+
+def append_skill_preview() -> Dict[str, str]:
+    readme_text = LOCAL_SKILLS.get("README", "")
+    return {
+        "humanizer": "humanizer" if "humanizer" in readme_text.lower() else "内置规则",
+        "ml-paper": "20-ml-paper-writing" if "20-ml-paper-writing" in readme_text.lower() else "内置规则",
+        "docx": "docx" if "docx" in readme_text.lower() else "内置规则",
+        "thesis-formatting": "thesis-skills 设计参考",
+    }
+
 
 def protect_hard_terms(text: str, domain: str) -> Tuple[str, Dict[str, str]]:
-    """硬锁保护工科术语，绝对禁止改动 v2.0"""
     protected = text
-    mapping = {}
+    mapping: Dict[str, str] = {}
     counter = 0
 
-    # 1. 保护 LaTeX 公式（多模式）
-    # 行内公式: $...$
-    for match in re.finditer(r'\$[^$]+?\$', text):
-        placeholder = f"__LOCK_{counter}__"
-        mapping[placeholder] = match.group()
-        protected = protected.replace(match.group(), placeholder, 1)
-        counter += 1
-
-    # 块级公式: $$...$$ 或 \[...\]
-    for match in re.finditer(r'\$\$[^$]+?\$\$|\\\[.*?\\\]', text, re.DOTALL):
-        placeholder = f"__LOCK_{counter}__"
-        mapping[placeholder] = match.group()
-        protected = protected.replace(match.group(), placeholder, 1)
-        counter += 1
-
-    # LaTeX命令: \frac{}{}, \sum_{}^{}, \int_{}^{}, etc.
-    for match in re.finditer(r'\\[a-zA-Z]+(?:\{[^}]*\}|\[[^\]]*\]|_[^{}s]|[_^]{[^}]*})?', text):
-        placeholder = f"__LOCK_{counter}__"
-        mapping[placeholder] = match.group()
-        protected = protected.replace(match.group(), placeholder, 1)
-        counter += 1
-
-    # 2. 保护化学式和材料名称
-    chemical_patterns = [
-        r'\b[A-Z][a-z]?\d*(?:_[\d-]+|[+\-]?\d*)?\b',  # Li+, Na+, NCM523
-        r'\b[A-Z][a-z]?\d*(?:_[\d-]+|[+\-]?\d*)?\s*[A-Z][a-z]?\d*',  # LiCoO2, NaMnO2
+    patterns = [
+        r"\$[^$]+?\$",
+        r"\$\$[^$]+?\$\$|\\\[.*?\\\]",
+        r"\\[a-zA-Z]+(?:\{[^}]*\}|\[[^\]]*\]|[_^]\{[^}]*\})?",
+        r"\b[A-Z][a-z]?\d*(?:_[\d-]+|[+\-]?\d*)?\b",
+        r"\d+\s*(?:°C|K|MPa|GPa|kPa|Pa|wt%|vol%|at%|mol%|nm|μm|mm|cm|m|km|Hz|kHz|MHz|GHz)",
     ]
-    for pattern in chemical_patterns:
-        for match in re.finditer(pattern, text):
-            # 排除普通单词
-            if len(match.group()) > 2 and any(c.isdigit() or c in '_+-' for c in match.group()):
+
+    for pattern in patterns:
+        for match in re.finditer(pattern, text, re.DOTALL):
+            token = match.group()
+            if token in protected:
                 placeholder = f"__LOCK_{counter}__"
-                mapping[placeholder] = match.group()
-                protected = protected.replace(match.group(), placeholder, 1)
+                mapping[placeholder] = token
+                protected = protected.replace(token, placeholder, 1)
                 counter += 1
 
-    # 3. 保护领域特定术语
-    if domain in DOMAINS:
-        for term in DOMAINS[domain]["hard_lock"]:
-            if isinstance(term, str):
-                # 精确匹配
-                if term in protected:
-                    placeholder = f"__LOCK_{counter}__"
-                    mapping[placeholder] = term
-                    protected = protected.replace(term, placeholder, 1)
-                    counter += 1
-
-    # 4. 保护测量单位和数值组合
-    unit_patterns = [
-        r'\d+\s*(?:mAh·g[^-1]|mAh g[^-1]|mA h[^-1]|A h[^-1])',
-        r'\d+\s*(?:°C|K|MPa|GPa|kPa|Pa)',
-        r'\d+\s*(?:wt%|vol%|at%|mol%)',
-        r'\d+\s*(?:nm|μm|mm|cm|m|km)',
-        r'\d+\s*(?:Hz|kHz|MHz|GHz)',
-        r'\d+\s*(?:S cm[^-1]|S m[^-1])',
-    ]
-    for pattern in unit_patterns:
-        for match in re.finditer(pattern, text):
+    for term in DOMAINS.get(domain, {}).get("hard_lock", []):
+        if isinstance(term, str) and term in protected:
             placeholder = f"__LOCK_{counter}__"
-            mapping[placeholder] = match.group()
-            protected = protected.replace(match.group(), placeholder, 1)
+            mapping[placeholder] = term
+            protected = protected.replace(term, placeholder, 1)
             counter += 1
 
     return protected, mapping
 
 
 def restore_hard_terms(text: str, mapping: Dict[str, str]) -> str:
-    """恢复硬锁保护的术语"""
-    result = text
+    restored = text
     for placeholder, original in mapping.items():
-        result = result.replace(placeholder, original)
-    return result
+        restored = restored.replace(placeholder, original)
+    return restored
 
-
-# ── 语言智能识别 ─────────────────────────────────────────────────────────────
 
 def detect_language(text: str) -> str:
-    """智能识别输入语言"""
-    # 统计中文字符
-    chinese_chars = len(re.findall(r'[\u4e00-\u9fff]', text))
     total_chars = len(text.strip())
-
     if total_chars == 0:
         return "unknown"
+    chinese_chars = len(re.findall(r"[\u4e00-\u9fff]", text))
+    return "zh" if chinese_chars / total_chars > 0.3 else "en"
 
-    chinese_ratio = chinese_chars / total_chars
-
-    if chinese_ratio > 0.3:
-        return "zh"
-    else:
-        return "en"
-
-
-# ── 影子合著者：标杆文献分析 v2.0 ───────────────────────────────────────────────
 
 def extract_language_genes(text: str) -> Dict:
-    """深度提取文献的语言基因"""
     genes = {
         "sentence_length_pattern": [],
         "connecting_words": Counter(),
@@ -373,72 +320,65 @@ def extract_language_genes(text: str) -> Dict:
         "citation_style": Counter(),
         "complexity_markers": Counter(),
     }
+    sentences = [s.strip() for s in re.split(r"[.!?。！？]", text) if s.strip()]
+    connectors = ["however", "therefore", "furthermore", "moreover", "thus", "hence"]
+    phrases = ["previous studies", "recent work", "suggest that", "indicate that", "demonstrate that"]
+    complexity = ["although", "while", "despite", "whereas", "whether or"]
 
-    sentences = [s.strip() for s in text.split('.') if s.strip()]
-    for sent in sentences[:100]:  # 分析前100句
-        # 句长模式
-        words = len(sent.split())
-        genes["sentence_length_pattern"].append(words)
-
-        # 连接词统计
-        connectors = [
-            'however', 'therefore', 'furthermore', 'moreover', 'additionally',
-            'consequently', 'subsequently', 'meanwhile', 'nevertheless',
-            'thus', 'hence', 'accordingly', 'otherwise', 'moreover'
-        ]
+    for sent in sentences[:100]:
+        genes["sentence_length_pattern"].append(len(sent.split()))
+        lower = sent.lower()
         for conn in connectors:
-            if re.search(rf'\b{conn}\b', sent.lower()):
+            if re.search(rf"\b{re.escape(conn)}\b", lower):
                 genes["connecting_words"][conn] += 1
-
-        # 学术短语
-        phrases = [
-            'it is worth noting', 'it should be mentioned', 'previous studies',
-            'recent work', 'to the best of', 'knowledge', 'suggest that',
-            'indicate that', 'demonstrate that', 'reveal that'
-        ]
         for phrase in phrases:
-            if phrase in sent.lower():
+            if phrase in lower:
                 genes["academic_phrases"][phrase] += 1
-
-        # 主动/被动语态
-        if re.search(r'\bwaswere\s+\w+ed\b', sent, re.IGNORECASE):
+        if re.search(r"\b(?:was|were|is|are|been|be)\s+\w+ed\b", lower):
             genes["voice_pattern"]["passive"] += 1
         else:
             genes["voice_pattern"]["active"] += 1
-
-        # 引用风格
-        citations = re.findall(r'\[\d+\]|\([^)]+\d+[^)]*\)|\w+\s+et\s+al\.', sent)
-        for cite in citations:
+        for cite in re.findall(r"\[\d+\]|\([^)]+\d+[^)]*\)|\w+\s+et\s+al\.", sent):
             genes["citation_style"][cite[:20]] += 1
-
-        # 复杂性标记
-        complexity = [
-            'although', 'while', 'despite', 'whereas', 'not only but also',
-            'either or', 'neither nor', 'whether or'
-        ]
         for marker in complexity:
-            if re.search(rf'\b{marker}\b', sent.lower()):
+            if marker in lower:
                 genes["complexity_markers"][marker] += 1
 
-    # 计算统计数据
     if genes["sentence_length_pattern"]:
-        genes["avg_sentence_length"] = sum(genes["sentence_length_pattern"]) / len(genes["sentence_length_pattern"])
-        genes["sentence_length_std"] = (sum((x - genes["avg_sentence_length"])**2 for x in genes["sentence_length_pattern"]) /
-                                       len(genes["sentence_length_pattern"]))**0.5
+        avg = sum(genes["sentence_length_pattern"]) / len(genes["sentence_length_pattern"])
+        std = (
+            sum((x - avg) ** 2 for x in genes["sentence_length_pattern"]) / len(genes["sentence_length_pattern"])
+        ) ** 0.5
+        genes["avg_sentence_length"] = avg
+        genes["sentence_length_std"] = std
     else:
         genes["avg_sentence_length"] = 0
         genes["sentence_length_std"] = 0
-
     return genes
 
 
-def analyze_reference_paper(file_bytes: bytes, filename: str) -> str:
-    """分析标杆文献的写作风格 v2.0 - 语言基因深度提取"""
+def extract_text(file_bytes: bytes, filename: str) -> str:
     try:
-        if filename.lower().endswith('.docx'):
+        lower_name = filename.lower()
+        if lower_name.endswith(".pdf"):
+            doc = fitz.open(stream=file_bytes, filetype="pdf")
+            return "\n\n".join(page.get_text() for page in doc)
+        if lower_name.endswith(".docx"):
+            doc = Document(BytesIO(file_bytes))
+            return "\n\n".join(p.text for p in doc.paragraphs if p.text.strip())
+        if lower_name.endswith((".txt", ".md")):
+            return file_bytes.decode("utf-8", errors="ignore")
+    except Exception as e:
+        return f"解析失败: {e}"
+    return ""
+
+
+def analyze_reference_paper(file_bytes: bytes, filename: str) -> str:
+    try:
+        if filename.lower().endswith(".docx"):
             doc = Document(BytesIO(file_bytes))
             paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
-            text = "\n".join(paragraphs[:80])  # 取前80段
+            text = "\n".join(paragraphs[:80])
         else:
             text = extract_text(file_bytes, filename)
             if not text or text.startswith("解析"):
@@ -446,461 +386,87 @@ def analyze_reference_paper(file_bytes: bytes, filename: str) -> str:
             paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
             text = "\n".join(paragraphs[:80])
 
-        # 提取风格特征
         lang = detect_language(text)
         genes = extract_language_genes(text)
-
-        # 生成风格分析报告
-        style_analysis = f"""
+        return f"""
 ## 🧬 标杆文献语言基因提取: {filename}
-
-### 📊 基础信息
 - **段落数**: {len(paragraphs)}
 - **语言**: {"中文" if lang == "zh" else "英文"}
-- **平均句长**: {genes.get('avg_sentence_length', 0):.1f} 词/句
-- **句长波动**: {genes.get('sentence_length_std', 0):.1f} (标准差)
-
-### 🎵 叙事节奏
-- **平均句长**: {genes.get('avg_sentence_length', 0):.1f} 词/句
-- **句式多样性**: {"高" if genes.get('sentence_length_std', 0) > 10 else "中" if genes.get('sentence_length_std', 0) > 5 else "低"}
-
-### 🔗 连接词偏好
-{', '.join([f'{k}({v})' for k, v in genes['connecting_words'].most_common(5)]) if genes['connecting_words'] else '无明显偏好'}
-
-### 🎓 学术短语
-{', '.join([f'{k}({v})' for k, v in genes['academic_phrases'].most_common(5)]) if genes['academic_phrases'] else '无常用短语'}
-
-### 📢 语态倾向
-- **主动**: {genes['voice_pattern']['active']} 句
-- **被动**: {genes['voice_pattern']['passive']} 句
-- **主动比**: {genes['voice_pattern']['active'] / max(1, genes['voice_pattern']['active'] + genes['voice_pattern']['passive']) * 100:.1f}%
-
-### 📚 引用风格
-{', '.join([k for k, v in genes['citation_style'].most_common(3)]) if genes['citation_style'] else '未检测到明确模式'}
-
-### 🧠 复杂性标记
-{', '.join([f'{k}({v})' for k, v in genes['complexity_markers'].most_common(5)]) if genes['complexity_markers'] else '无明显复杂结构'}
-
-### 📝 样本文本
-{text[:500]}...
-
-### 🎯 模仿策略
-1. **句长控制**: 目标平均句长 {genes.get('avg_sentence_length', 0):.0f} 词，波动 ±{genes.get('sentence_length_std', 0):.0f}
-2. **连接词**: 优先使用 {', '.join([k for k, v in genes['connecting_words'].most_common(3)]) if genes['connecting_words'] else '自然过渡'}
-3. **语态**: {"偏好主动语态" if genes['voice_pattern']['active'] > genes['voice_pattern']['passive'] * 1.5 else "平衡主动/被动"}
-4. **复杂性**: {"高复杂句式" if sum(genes['complexity_markers'].values()) > 5 else "中等复杂度"}
-"""
-        return style_analysis
+- **平均句长**: {genes.get('avg_sentence_length', 0):.1f}
+- **句长波动**: {genes.get('sentence_length_std', 0):.1f}
+- **连接词偏好**: {', '.join([f'{k}({v})' for k, v in genes['connecting_words'].most_common(5)]) if genes['connecting_words'] else '无明显偏好'}
+- **学术短语**: {', '.join([f'{k}({v})' for k, v in genes['academic_phrases'].most_common(5)]) if genes['academic_phrases'] else '无常用短语'}
+- **模仿策略**: 优先模仿句长、连接词、语态和复杂度节奏。
+""".strip()
     except Exception as e:
         return f"分析失败: {e}"
 
 
-# ── 零篡位 Prompt 生成器 ───────────────────────────────────────────────────
-
-def create_strict_prompt(
-    function: str,
-    input_text: str,
-    section: str,
-    domain: str,
-    reference_styles: List[str],
-    lang: str
-) -> str:
-    """创建单一职责 prompt，严格功能隔离 v2.0"""
-
-    # 语言锁定强制声明（翻译功能除外）
+def create_strict_prompt(function: str, input_text: str, section: str, domain: str, reference_styles: List[str], lang: str) -> str:
+    skill_groups = append_skill_preview()
     lang_lock = {
-        "zh": """## ⚠️ 语言锁定（强制执行）
-1. **检测到中文输入**：全程使用中文处理
-2. **零翻译**：严格禁止任何中→英翻译行为
-3. **输出语言锁定**：所有输出必须是中文
-4. **术语保护**：英文专有名词保持原样""",
-        "en": """## ⚠️ Language Lock (Strict Enforcement)
-1. **English Input Detected**: Process entirely in English
-2. **Zero Translation**: Strictly forbidden from translating to any other language
-3. **Output Language Lock**: All output must be in English
-4. **Term Protection**: Preserve non-English technical terms as-is"""
+        "zh": "所有输出默认保持中文；若功能为翻译，则必须输出英文。",
+        "en": "All output should remain English by default; if translation mode is selected, output must be Chinese.",
+        "unknown": "保持输入语言语义一致。",
     }
+    base = f"""
+# Xueyan OS v4.0
+- 功能模式: {function}
+- 论文板块: {section}
+- 研究领域: {domain}
+- 输入语言: {"中文" if lang == "zh" else "英文" if lang == "en" else "未知"}
+- 本地规则包: humanizer={skill_groups['humanizer']}, ml-paper={skill_groups['ml-paper']}, docx={skill_groups['docx']}, thesis-formatting={skill_groups['thesis-formatting']}
+- 语言约束: {lang_lock.get(lang, '')}
 
-    translation_lock = {
-        "zh": """## ✅ 翻译模式语言锁定
-1. **检测到中文输入**：必须翻译为英文
-2. **输出语言锁定**：仅允许英文输出
-3. **术语保护**：英文专有名词与 LaTeX 公式保持原样""",
-        "en": """## ✅ 翻译模式语言锁定
-1. **English Input Detected**: Must translate to Chinese
-2. **Output Language Lock**: Output must be Chinese only
-3. **Term Protection**: Preserve non-English technical terms and LaTeX as-is"""
-    }
-
-    # 基础注入
-    base_injection = f"""
-# XueYan OS v4.0 - 零篡位执行系统
-## 🔒 当前配置
-- **功能模式**: {function}
-- **论文板块**: {section}
-- **研究领域**: {domain}
-- **输入语言**: {"中文" if lang == "zh" else "英文"}
-- **术语保护**: 已激活硬锁保护
-
-## 📚 本地学术库
-已加载 {len(LOCAL_SKILLS)} 个学术 Skills
-
-{translation_lock.get(lang, '') if function == "📝 中转英翻译" else lang_lock.get(lang, '')}
+{HUMANIZER_RULES}
 """
-
-    # 添加 Humanizer 规则
-    if "Humanizer" in function or "去AI味" in function:
-        base_injection += f"""
-## 🎯 Humanizer 核心规则（{lang.upper()}专用）
-### AI 痕迹识别清单
-1. **过度强调意义**: "具有...意义", "crucial", "critical", "important", "significant"
-2. **AI 常用词**: "delve", "landscape", "realm", "leverage", "underscore", "utilize"
-3. **破折号滥用**: 解释性插入语过多（—which, —that）
-4. **三点式堆砌**: A, B, and C 结构过多
-5. **促销腔**: "exciting", "promising", "novel", "groundbreaking"
-6. **空洞-ing分析**: "indicating", "suggesting", "implying" 滥用
-7. **陈词滥调**: "综上所述", "总而言之", "in conclusion", "it is worth noting that"
-
-### 人味注入策略
-- **承认不确定性**: "suggest", "may", "potentially", "appears to"
-- **节奏变化**: 长短句交替，避免单调
-- **自然过渡**: 删除机械连接词（Firstly, Secondly, Furthermore）
-- **简洁动词**: show, use, find, make (而非 demonstrate, utilize, discover, fabricate)
-- **语气约束**: 不夸大贡献，不引入新的论点
-
-### 语序优化原则
-- **当前语言**: {"中文" if lang == "zh" else "英文"}
-- **优化目标**: {"优化中文语序，保持中文输出" if lang == "zh" else "增强英文节奏感，保持英文输出"}
-- **零翻译**: 严格禁止语种转换
-"""
-    else:
-        base_injection += HUMANIZER_RULES + "\n"
 
     if function == "📝 中转英翻译":
-        base_injection += TRANSLATION_SKILL_RULES + "\n"
-
-    if function in {"📋 Redlining修订", "✨ 表达润色", "🤖 去AI味 (Humanizer)", "🎯 精修模式"}:
-        base_injection += DOCX_SKILL_RULES + "\n"
-
-    # 如果是 Results 板块，强化实验结果叙事
+        base += TRANSLATION_SKILL_RULES + "\n"
+    if function in MODIFICATION_FUNCTIONS:
+        base += DOCX_SKILL_RULES + "\n"
     if section == "结果":
-        base_injection += RESULTS_SKILL_RULES + "\n"
-
-    # 如果是 Results 板块且有 ML 写作需求，添加 checklist
+        base += RESULTS_SKILL_RULES + "\n"
     if section == "结果" and domain == "🧠 机器学习":
-        base_injection += ML_CHECKLIST + "\n"
+        base += ML_CHECKLIST + "\n"
+    if reference_styles and function in SHADOW_FUNCTIONS:
+        base += "\n## 标杆文献风格参考\n" + "\n".join(reference_styles[:3]) + "\n"
 
-    # 添加标杆文献风格（影子合著者：仅限起草/构思类功能）
-    shadow_functions = {"✍️ 逐段起草", "💡 研究想法构思", "📄 节节头脑风暴"}
-    if reference_styles and function in shadow_functions:
-        base_injection += "\n## 📚 影子合著者：标杆文献语言基因\n"
-        base_injection += "\n".join(reference_styles)
-        base_injection += "\n\n**模仿指令**: 严格模仿上述标杆文献的句长、连接词、语态和复杂性偏好。\n"
+    base += f"""
+## 功能规则
+{chr(10).join(f'- {rule}' for rule in FUNCTION_MATRIX.get(function, {}).get('rules', []))}
 
-    # 板块特定指导
-    section_info = SECTIONS.get(section, {})
-    if section_info:
-        base_injection += f"""
-## 📝 {section} 板块写作要求
-- **核心重点**: {section_info.get('focus', '')}
-- **建议长度**: {section_info.get('max_words', '')} 词
-- **写作策略**: 针对该板块的叙事逻辑进行优化
+## 当前输入
+{input_text}
 """
 
-    # 功能特定规则（零篡位）
-    func_rules = FUNCTION_MATRIX.get(function, {})
-    if func_rules:
-        base_injection += f"""
-## 🎯 {function} 功能规则（单一职责）
-{chr(10).join(f'- {rule}' for rule in func_rules.get('rules', []))}
-
-**⛔ 零篡位强制声明**: 严格按照上述规则执行，绝不越界到其他功能领域。
-"""
-
-    # 翻译专属强制校验
     if function == "📝 中转英翻译":
-        base_injection += f"""
-## ✅ 翻译校验（Self-Correction）
-- **任务标识**: translation
-- **输入语言**: {"中文" if lang == "zh" else "英文"}
-- **输出语言**: {"英文" if lang == "zh" else "中文"}
-- **硬性要求**: 必须输出目标语言文本，禁止同语输出
+        return base + """
+请严格执行跨语种精准学术翻译：
+1. 输入中文时输出英文；输入英文时输出中文。
+2. 严禁同语种复述。
+3. 工科术语、LaTeX、化学式、材料名必须原样保留。
+4. 不新增事实，不夸大贡献。
+5. 只输出翻译后的正文，不附加解释。
 """
 
-    # 功能特定模板
-    function_templates = {
-        "📝 中转英翻译": f"""{base_injection}
-
-# 📝 任务：学术翻译（CN↔EN）
-## 输入文本
-{input_text}
-
-## 翻译协议（Translation Protocol）
-- **任务定义**：必须执行跨语种学术翻译
-- **转换方向**：
-  - 输入为中文 → 输出地道工科论文英文
-  - 输入为英文 → 输出自然规范学术中文
-- **禁止项**：严禁原样输出原文语言，严禁新增事实
-
-## 术语与公式硬锁
-- 必须保留 $Li^+$、NCM523、XRD、SEM 等术语与 LaTeX 形式不变
-- 不得改写专业缩写
-
-## 输出要求
-1. ✅ 必须输出目标语种文本
-2. ✅ 保持原意完整，不编造新信息
-3. ✅ 允许必要学术化表达优化，使语句符合工科叙事习惯
-4. ✅ 中译英时自动补全冠词、优化被动语态，并优先使用 enhanced / optimized / alleviated / improved 等准确学术动词
-5. ✅ 英译中时消除翻译腔，确保中文自然、凝练、符合学术表达
-6. ✅ 术语与 LaTeX 原样保留
-7. ❌ 禁止扩写研究结论或夸大贡献
-
-## 输出格式
-```
-[翻译后的目标语言文本]
-```
-
-## 关键术语对照
-[列出5-10个核心术语的翻译]
-""",
-
-        "✨ 表达润色": f"""{base_injection}
-
-# ✨ 任务：表达润色（同语言优化）
-## 输入文本
-{input_text}
-
-## 润色要求
-1. ✅ 提升学术地道性
-2. ✅ 替换高级动词
-3. ✅ {"保持中文，优化中文" if lang == "zh" else "保持英文，优化英文"}
-4. ✅ 保持原意
-5. ❌ 严格禁止翻译
-
-## 输出格式
-```
-[润色后的文本]
-```
-
-## 修改说明
-[列出主要修改点：动词替换、结构调整等]
-""",
-
-        "🔍 逻辑检查": f"""{base_injection}
-
-# 🔍 任务：逻辑检查（不修改文本）
-## 输入文本
-{input_text}
-
-## 检查要点
-1. ✅ 因果链条完整性
-2. ✅ 论据与论点一致性
-3. ✅ 逻辑衔接流畅性
-4. ✅ 术语使用准确性
-
-## 输出格式
-```
-✅ 逻辑检查通过
-```
-或
-```
-❌ 发现以下问题:
-1. [具体问题]
-2. [具体问题]
-...
-```
-
-**⚠️ 注意**: 仅检查，不修改文本。
-""",
-
-        "🤖 去AI味 (Humanizer)": f"""{base_injection}
-
-# 🤖 任务：去AI化处理（零翻译）
-## 输入文本
-{input_text}
-
-## 去AI化要求
-{"1. ✅ 优化中文语序，保持中文输出" if lang == "zh" else "1. ✅ 增强英文节奏感，保持英文输出"}
-2. ✅ 消除 AI 常用词
-3. ✅ 删除机械连接词
-4. ✅ 节奏变化
-5. ✅ 承认不确定性
-6. ❌ 严格禁止翻译
-
-## 输出格式
-```
-[去AI化后的文本]
-```
-
-## 修改说明
-[列出3-5个关键修改点及理由]
-""",
-
-        "👨‍⚖️ Reviewer视角": f"""{base_injection}
-
-# 👨‍⚖️ 任务：Reviewer视角审视
-## 输入文本
-{input_text}
-
-## 审视要点
-1. ✅ 学术规范性
-2. ✅ 论证强度
-3. ✅ 表达清晰度
-4. ✅ 潜在问题
-
-## 输出格式
-## 📝 审稿意见
-[总体评价]
-
-## 🔍 具体建议
-1. [具体建议]
-2. [具体建议]
-...
-
-## ✅ 优点
-[列出优点]
-""",
-
-        "✍️ 逐段起草": f"""{base_injection}
-
-# ✍️ 任务：逐段起草（影子写作模式）
-## 输入大纲
-{input_text}
-
-## 起草要求
-1. ✅ 将大纲扩充为正式段落
-2. ✅ 模仿标杆文献风格（句长、连接词、语态）
-3. ✅ 符合 {section} 板块特点
-4. ✅ 保持学术严谨性
-5. ✅ {"中文输入输出中文，英文输入输出英文" if lang != "unknown" else "保持原语言"}
-
-## 输出格式
-```
-[扩充后的正式段落]
-```
-
-## 模仿说明
-[说明模仿了标杆文献的哪些特征：句长、连接词、语态等]
-""",
-
-        "🎯 精修模式": f"""{base_injection}
-
-# 🎯 任务：深度精修（顶刊水准）
-## 输入文本
-{input_text}
-
-## 精修要求
-1. ✅ 达到顶刊出版水准
-2. ✅ 模仿标杆文献风格
-3. ✅ 符合 {section} 板块特点
-4. ✅ 术语精确使用
-5. ✅ {"保持原语言，优化原语言" if lang != "unknown" else "保持原语言"}
-
-## 输出格式
-```
-[精修后的文本]
-```
-
-## 修改说明
-[详细说明修改内容和理由]
-""",
-
-        "📝 引用验证": f"""{base_injection}
-
-# 📝 任务：引用格式验证
-## 输入文本
-{input_text}
-
-## 验证要点
-1. ✅ 引用格式统一
-2. ✅ 引用完整性
-3. ✅ 引用相关性
-
-## 输出格式
-```
-✅ 引用格式验证通过
-```
-或
-```
-❌ 发现以下问题:
-1. [具体问题]
-2. [具体问题]
-...
-```
-""",
-
-        "🎨 图表规范检查": f"""{base_injection}
-
-# 🎨 任务：图表描述规范检查
-## 输入文本
-{input_text}
-
-## 检查要点
-1. ✅ 图表引用完整性
-2. ✅ 图表描述清晰度
-3. ✅ 色盲友好性
-4. ✅ 坐标轴标注
-
-## 输出格式
-```
-✅ 图表描述规范
-```
-或
-```
-❌ 发现以下问题:
-1. [具体问题]
-2. [具体问题]
-...
-```
-""",
-
-        "📋 Redlining修订": f"""{base_injection}
-
-# 📋 任务：Redlining修订（显示修改痕迹）
-## 输入文本
-{input_text}
-
-## 修订要求
-1. ✅ 显示修改痕迹
-2. ✅ 提供对比视图
-3. ✅ 保持原语言
-4. ✅ 说明修改理由
-
-## 输出格式
-```
-## 修改后文本
-[修改后的文本]
-
-## 修改说明
-[详细列出所有修改点]
-```
-""",
-    }
-
-    # 默认模板
-    default_template = f"""{base_injection}
-
-# 🎯 任务：{function}
-## 输入文本
-{input_text}
-
-## 输出要求
-严格按照 {function} 功能规则执行
-{"保持原语言，绝不翻译" if lang != "unknown" else ""}
-
-## 输出格式
-```
-[处理结果]
-```
-
-## 修改说明
-[简要说明处理内容]
+    if function == "🤖 去AI味 (Humanizer)":
+        return base + """
+请只做同语种去AI化重构：
+1. 保持原语种。
+2. 清理模板腔和机械连接词。
+3. 用长短句变化增强真人节奏。
+4. 不翻译，不新增论点。
+5. 先给修改后文本，再给3-5条修改说明。
 """
 
-    return function_templates.get(function, default_template)
+    if function == "📋 Redlining修订":
+        return base + """
+请输出“修改后文本”与“修改说明”。保持原语种，不翻译。
+"""
 
+    return base + "\n请严格按功能职责输出结果，避免越界到其他功能。"
 
-# ── 原生 API 调用（带重试）──────────────────────────────────────────────────
 
 def get_client():
     if not CLAUDE_API_KEY:
@@ -908,7 +474,7 @@ def get_client():
         st.stop()
     return anthropic.Anthropic(
         api_key=CLAUDE_API_KEY,
-        base_url=CLAUDE_BASE_URL if CLAUDE_BASE_URL != "https://api.anthropic.com" else None
+        base_url=CLAUDE_BASE_URL if CLAUDE_BASE_URL != "https://api.anthropic.com" else None,
     )
 
 
@@ -924,93 +490,257 @@ def call_api(prompt: str, timeout: int = 300) -> str:
         max_tokens=8192,
         temperature=0.2,
         timeout=timeout,
-        messages=[{"role": "user", "content": prompt}]
+        messages=[{"role": "user", "content": prompt}],
     )
-    return message.content[0].text
-
-
-# ── 文件处理 ────────────────────────────────────────────────────────────────
-
-def extract_text(file_bytes: bytes, filename: str) -> str:
-    """提取文件文本"""
-    try:
-        if filename.endswith('.pdf'):
-            doc = fitz.open(stream=file_bytes, filetype="pdf")
-            return "\n\n".join([p.get_text() for p in doc])
-        elif filename.endswith('.docx'):
-            doc = Document(BytesIO(file_bytes))
-            return "\n\n".join([p.text for p in doc.paragraphs if p.text.strip()])
-    except Exception as e:
-        return f"解析失败: {e}"
-    return ""
+    return "".join(block.text for block in message.content if getattr(block, "type", "") == "text")
 
 
 def create_docx_with_redlines(original: str, revised: str, metadata: dict) -> bytes:
-    """创建带修订痕迹的Word文档"""
     doc = Document()
     doc.add_heading(f"学研·修订模式 - {metadata['function']}", 0)
-
-    # 元信息
-    p = doc.add_paragraph()
-    p.add_run(f"板块: {metadata['section']}\n")
-    p.add_run(f"领域: {metadata['domain']}\n")
-    p.add_run(f"时间: {metadata['timestamp']}\n")
-
+    info = doc.add_paragraph()
+    info.add_run(f"板块: {metadata.get('section', '未指定')}\n")
+    info.add_run(f"领域: {metadata.get('domain', '未指定')}\n")
+    info.add_run(f"时间: {metadata.get('timestamp', '')}\n")
     doc.add_heading("原文", 1)
     doc.add_paragraph(original)
-
     doc.add_heading("修改后", 1)
     doc.add_paragraph(revised)
-
-    # 简单差异标注（使用颜色）
     doc.add_heading("修改说明", 2)
     original_words = set(original.lower().split())
     revised_words = set(revised.lower().split())
-
     added = revised_words - original_words
     removed = original_words - revised_words
-
     if added:
         p = doc.add_paragraph()
         run = p.add_run("新增词汇: ")
         run.font.color.rgb = RGBColor(0, 128, 0)
         p.add_run(", ".join(list(added)[:20]))
-
     if removed:
         p = doc.add_paragraph()
         run = p.add_run("删除词汇: ")
         run.font.color.rgb = RGBColor(255, 0, 0)
         p.add_run(", ".join(list(removed)[:20]))
-
-    doc_io = BytesIO()
-    doc.save(doc_io)
-    doc_io.seek(0)
-    return doc_io.read()
+    buffer = BytesIO()
+    doc.save(buffer)
+    buffer.seek(0)
+    return buffer.read()
 
 
 def create_docx(content: str, metadata: dict) -> bytes:
-    """创建 Word 文档"""
     doc = Document()
-    doc.add_heading(f"学研·工科科研助手 - {metadata['function']}", 0)
-
-    # 元信息
-    p = doc.add_paragraph()
-    p.add_run(f"板块: {metadata['section']}\n")
-    p.add_run(f"领域: {metadata['domain']}\n")
-    p.add_run(f"时间: {metadata['timestamp']}\n")
-
+    doc.add_heading(f"学研·工科科研助手 - {metadata.get('function', '导出')}", 0)
+    info = doc.add_paragraph()
+    for key in ("section", "domain", "timestamp"):
+        if metadata.get(key):
+            info.add_run(f"{key}: {metadata[key]}\n")
     doc.add_heading("处理结果", 1)
     doc.add_paragraph(content)
+    buffer = BytesIO()
+    doc.save(buffer)
+    buffer.seek(0)
+    return buffer.read()
 
-    doc_io = BytesIO()
-    doc.save(doc_io)
-    doc_io.seek(0)
-    return doc_io.read()
+
+def parse_format_guidelines(guideline_text: str, guideline_file_bytes: bytes | None = None, filename: str = "") -> Dict:
+    text = guideline_text.strip()
+    if guideline_file_bytes and filename:
+        extracted = extract_text(guideline_file_bytes, filename)
+        if extracted and not extracted.startswith("解析"):
+            text = f"{text}\n{extracted}".strip()
+
+    rules = {
+        "raw_text": text,
+        "title_font": "黑体" if "黑体" in text else "",
+        "title_size": "三号" if "三号" in text else "",
+        "body_font": "宋体" if "宋体" in text else "",
+        "body_size": "小四" if "小四" in text else "",
+        "line_spacing": 20 if "20磅" in text else None,
+        "header_required": any(token in text for token in ["页眉", "校名"]),
+        "reference_gbt": "GB/T 7714" in text,
+    }
+    summary = []
+    if rules["title_font"] or rules["title_size"]:
+        summary.append(f"标题规则：{rules['title_font'] or '未指定'} {rules['title_size'] or ''}".strip())
+    if rules["body_font"] or rules["body_size"]:
+        summary.append(f"正文规则：{rules['body_font'] or '未指定'} {rules['body_size'] or ''}".strip())
+    if rules["line_spacing"]:
+        summary.append(f"行距：{rules['line_spacing']} 磅")
+    if rules["header_required"]:
+        summary.append("需要检查页眉页脚")
+    if rules["reference_gbt"]:
+        summary.append("需要检查参考文献格式/悬挂缩进")
+    rules["summary"] = "；".join(summary) if summary else "已读取格式指南，但未识别出明确格式条目。"
+    return rules
 
 
-# ── UI Styling ───────────────────────────────────────────────────────────────
+def _paragraph_text(paragraph) -> str:
+    return paragraph.text.strip()
 
-st.markdown("""
+
+def _is_heading(paragraph) -> bool:
+    style_name = paragraph.style.name if paragraph.style else ""
+    text = _paragraph_text(paragraph)
+    return style_name.startswith("Heading") or bool(re.match(r"^(第[一二三四五六七八九十]+[章节]|[一二三四五六七八九十]+、|\d+\.)", text))
+
+
+def audit_docx_format(docx_bytes: bytes, guideline_rules: Dict) -> Dict:
+    doc = Document(BytesIO(docx_bytes))
+    issues = []
+    stats = {
+        "sections": len(doc.sections),
+        "paragraphs": len(doc.paragraphs),
+        "headings": 0,
+        "body_paragraphs": 0,
+    }
+
+    for idx, paragraph in enumerate(doc.paragraphs):
+        text = _paragraph_text(paragraph)
+        if not text:
+            continue
+        if _is_heading(paragraph):
+            stats["headings"] += 1
+            run = paragraph.runs[0] if paragraph.runs else None
+            if guideline_rules.get("title_font") and run and run.font.name and guideline_rules["title_font"] not in run.font.name:
+                issues.append({
+                    "id": f"heading_font_{idx}",
+                    "type": "heading_font",
+                    "label": "对齐各级标题字体",
+                    "detail": f"第 {idx + 1} 段标题字体疑似不是 {guideline_rules['title_font']}。",
+                })
+        else:
+            stats["body_paragraphs"] += 1
+            fmt = paragraph.paragraph_format
+            if guideline_rules.get("line_spacing") and fmt.line_spacing and abs(float(fmt.line_spacing.pt) - guideline_rules["line_spacing"]) > 0.5:
+                issues.append({
+                    "id": f"body_spacing_{idx}",
+                    "type": "body_spacing",
+                    "label": "统一正文行距",
+                    "detail": f"第 {idx + 1} 段行距不是 {guideline_rules['line_spacing']} 磅。",
+                })
+
+    if guideline_rules.get("header_required"):
+        for sec_index, section in enumerate(doc.sections):
+            header_text = "".join(p.text for p in section.header.paragraphs).strip()
+            if not header_text:
+                issues.append({
+                    "id": f"header_{sec_index}",
+                    "type": "header",
+                    "label": "修正全局页眉页脚",
+                    "detail": f"第 {sec_index + 1} 个 section 缺少页眉内容。",
+                })
+
+    if guideline_rules.get("reference_gbt"):
+        ref_hits = [p for p in doc.paragraphs if any(token in p.text for token in ["参考文献", "References"])]
+        if not ref_hits:
+            issues.append({
+                "id": "refs_missing",
+                "type": "references",
+                "label": "检查参考文献格式",
+                "detail": "未检测到明确的参考文献标题，无法确认 GB/T 7714 对齐情况。",
+            })
+        else:
+            issues.append({
+                "id": "refs_hanging",
+                "type": "references",
+                "label": "统一参考文献悬挂缩进",
+                "detail": "检测到参考文献区，建议统一悬挂缩进与段间距。",
+            })
+
+    unique_options = []
+    seen = set()
+    for issue in issues:
+        if issue["label"] not in seen:
+            unique_options.append(issue)
+            seen.add(issue["label"])
+
+    return {
+        "issues": issues,
+        "fix_options": unique_options,
+        "stats": stats,
+    }
+
+
+def _set_run_font(run, font_name: str | None = None, size_pt: float | None = None, bold: bool | None = None):
+    if font_name:
+        run.font.name = font_name
+        rpr = run._element.get_or_add_rPr()
+        rfonts = rpr.rFonts or OxmlElement("w:rFonts")
+        rfonts.set(qn("w:eastAsia"), font_name)
+        rfonts.set(qn("w:ascii"), font_name)
+        rfonts.set(qn("w:hAnsi"), font_name)
+        if rpr.rFonts is None:
+            rpr.append(rfonts)
+    if size_pt:
+        run.font.size = Pt(size_pt)
+    if bold is not None:
+        run.font.bold = bold
+
+
+def apply_docx_fixes(docx_bytes: bytes, guideline_rules: Dict, selected_fixes: List[str]) -> bytes:
+    doc = Document(BytesIO(docx_bytes))
+
+    if "对齐各级标题字体" in selected_fixes:
+        for paragraph in doc.paragraphs:
+            if _is_heading(paragraph):
+                for run in paragraph.runs:
+                    _set_run_font(run, guideline_rules.get("title_font") or "黑体", 16, True)
+                paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+
+    if "统一正文行距" in selected_fixes:
+        for paragraph in doc.paragraphs:
+            if _paragraph_text(paragraph) and not _is_heading(paragraph):
+                fmt = paragraph.paragraph_format
+                fmt.line_spacing_rule = WD_LINE_SPACING.EXACTLY
+                fmt.line_spacing = Pt(guideline_rules.get("line_spacing") or 20)
+                fmt.first_line_indent = Cm(0.74)
+                for run in paragraph.runs:
+                    _set_run_font(run, guideline_rules.get("body_font") or "宋体", 12)
+
+    if "修正全局页眉页脚" in selected_fixes:
+        for section in doc.sections:
+            if section.start_type in (WD_SECTION.NEW_PAGE, WD_SECTION.CONTINUOUS):
+                header = section.header
+                if not header.paragraphs:
+                    header.add_paragraph()
+                header.paragraphs[0].text = "学研 · 确定性格式对齐"
+                header.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                for run in header.paragraphs[0].runs:
+                    _set_run_font(run, guideline_rules.get("body_font") or "宋体", 10)
+
+    if "统一参考文献悬挂缩进" in selected_fixes:
+        in_refs = False
+        for paragraph in doc.paragraphs:
+            text = _paragraph_text(paragraph)
+            if any(token in text for token in ["参考文献", "References"]):
+                in_refs = True
+                continue
+            if in_refs and text:
+                fmt = paragraph.paragraph_format
+                fmt.left_indent = Cm(0.74)
+                fmt.first_line_indent = Cm(-0.74)
+                fmt.line_spacing_rule = WD_LINE_SPACING.EXACTLY
+                fmt.line_spacing = Pt(guideline_rules.get("line_spacing") or 20)
+
+    buffer = BytesIO()
+    doc.save(buffer)
+    buffer.seek(0)
+    return buffer.read()
+
+
+def create_format_audit_summary(audit_report: Dict) -> str:
+    stats = audit_report.get("stats", {})
+    issues = audit_report.get("issues", [])
+    return (
+        f"共检测 {stats.get('sections', 0)} 个 section，"
+        f"{stats.get('paragraphs', 0)} 个段落，"
+        f"发现 {len(issues)} 条格式问题。"
+    )
+
+
+# ── UI 样式 ──────────────────────────────────────────────────────────────────
+st.markdown(
+    """
 <style>
     .stApp { background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%); }
     .main-header {
@@ -1019,13 +749,12 @@ st.markdown("""
         color: white; border-radius: 12px; margin-bottom: 1.5rem;
         box-shadow: 0 10px 25px rgba(30, 58, 138, 0.2);
     }
-    .section-tab { background: white; padding: 0.5rem 1rem; border-radius: 8px; font-weight: 600; }
-    .comparison-box {
+    .comparison-box, .engine-box {
         background: white;
         padding: 1rem 1rem 1.25rem 1rem;
         border-radius: 12px;
         border: 1px solid #dbe4f0;
-        min-height: 540px;
+        min-height: 520px;
         box-shadow: 0 6px 18px rgba(15, 23, 42, 0.05);
     }
     .result-toolbar {
@@ -1035,439 +764,409 @@ st.markdown("""
         border: 1px solid #e2e8f0;
         border-radius: 10px;
     }
-    .stButton>button[kind="primary"] {
-        background: linear-gradient(135deg, #2563eb, #3b82f6);
-        color: white; border: none; padding: 0.75rem 2rem;
-        font-weight: 600; border-radius: 8px;
-    }
 </style>
-""", unsafe_allow_html=True)
-
-
-# ── Header ──────────────────────────────────────────────────────────────────
-
-st.markdown("""
-<div class="main-header">
-    <h1>🧪 学研·工科科研助手 v4.0</h1>
-    <p style="margin: 0.5rem 0 0 0; opacity: 0.9;">15+功能矩阵 · 板块锚定 · 零篡位执行 · 影子合著者 · 语言基因深度提取</p>
-</div>
-""", unsafe_allow_html=True)
-
-# API 状态栏
-col1, col2, col3 = st.columns(3)
-with col1:
-    st.success(f"✅ API 就绪" if CLAUDE_API_KEY else "❌ API 未配置")
-with col2:
-    st.info(f"📚 {len(LOCAL_SKILLS)} 个学术 Skills")
-with col3:
-    st.success("⏱️ 300s 超时 | 3次重试")
-
-# ── 侧边栏：15+功能矩阵 + 影子合著者 ─────────────────────────────────────────
-
-with st.sidebar:
-    st.markdown("---")
-    st.subheader("🎯 15+ 功能矩阵")
-
-    function = st.selectbox(
-        "选择功能",
-        list(FUNCTION_MATRIX.keys()),
-        help="每个功能严格单一职责，零篡位执行"
-    )
-
-    # 显示当前功能规则
-    func_info = FUNCTION_MATRIX.get(function, {})
-    if func_info:
-        st.caption(f"📋 {func_info.get('description', '')}")
-        for rule in func_info.get('rules', []):
-            st.caption(rule)
-
-    st.markdown("---")
-    st.subheader("🔬 学科领域")
-
-    domain = st.selectbox(
-        "研究领域",
-        list(DOMAINS.keys()),
-        help="选择领域以激活术语硬锁保护"
-    )
-
-    st.markdown("---")
-    st.subheader("📚 影子合著者：标杆文献")
-
-    reference_files = st.file_uploader(
-        "上传标杆文献 (1-3篇)",
-        type=["pdf", "docx"],
-        accept_multiple_files=True,
-        help="AI将学习其写作风格并模仿"
-    )
-
-    reference_styles = []
-    if reference_files:
-        for ref_file in reference_files:
-            if ref_file.name not in st.session_state.reference_docs:
-                with st.spinner(f"分析 {ref_file.name}..."):
-                    ref_bytes = ref_file.read()
-                    text = extract_text(ref_bytes, ref_file.name)
-                    if text and not text.startswith("解析"):
-                        style = analyze_reference_paper(ref_bytes, ref_file.name)
-                        st.session_state.reference_docs[ref_file.name] = style
-                        st.success(f"✅ {ref_file.name}")
-
-        # 收集所有标杆文献风格
-        reference_styles = list(st.session_state.reference_docs.values())
-
-    if st.session_state.reference_docs:
-        st.success(f"✅ 已加载 {len(st.session_state.reference_docs)} 篇标杆文献")
-
-    st.markdown("---")
-    st.subheader("📁 普通文件上传")
-
-    uploaded_file = st.file_uploader("上传待处理文件", type=["pdf", "docx"])
-
-    if uploaded_file:
-        uploaded_bytes = uploaded_file.read()
-        extracted = extract_text(uploaded_bytes, uploaded_file.name)
-        if extracted and not extracted.startswith("解析"):
-            st.success(f"✅ 提取 {len(extracted)} 字符")
-            if st.button("📥 填入当前板块", use_container_width=True):
-                target_input_key = f"input_{st.session_state.active_section}"
-                st.session_state[target_input_key] = extracted[:10000]
-                st.session_state.pending_import_text = ""
-                st.rerun()
-
-# ── 顶部：板块锚点 Tabs ─────────────────────────────────────────────────────
-
-st.markdown("---")
-section_names = ["摘要", "引言", "方法", "结果", "讨论", "结论"]
-section_icons = {
-    "摘要": "📝",
-    "引言": "📘",
-    "方法": "🔬",
-    "结果": "📊",
-    "讨论": "💡",
-    "结论": "🏁",
-}
-active_section = st.segmented_control(
-    "论文板块",
-    options=section_names,
-    default=st.session_state.active_section,
-    format_func=lambda name: f"{section_icons[name]} {name}",
-    key="active_section",
+""",
+    unsafe_allow_html=True,
 )
 
 
-def apply_pending_import() -> None:
-    pending_text = st.session_state.get("pending_import_text", "")
-    if not pending_text:
+def render_header() -> None:
+    st.markdown(
+        """
+<div class="main-header">
+    <h1>🧪 学研·工科科研助手 v4.0</h1>
+    <p style="margin: 0.5rem 0 0 0; opacity: 0.9;">双引擎架构 · 15+功能矩阵 · 影子写作 · 确定性格式对齐</p>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.success("✅ API 就绪" if CLAUDE_API_KEY else "❌ API 未配置")
+    with col2:
+        st.info(f"📚 {len(append_skill_preview())} 组规则包")
+    with col3:
+        st.success("⏱️ 300s 超时 | 3次重试")
+
+
+def render_result_actions(section_name: str, current_input: str, previous_output: str, function: str, domain: str) -> None:
+    st.markdown("<div class='result-toolbar'><strong>快捷操作</strong></div>", unsafe_allow_html=True)
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        st.download_button(
+            "📋 下载结果.txt",
+            previous_output.encode("utf-8"),
+            file_name=f"xueyan_{section_name}_result.txt",
+            mime="text/plain",
+            key=f"download_preview_{section_name}_{function}",
+        )
+    with col2:
+        if function in MODIFICATION_FUNCTIONS:
+            redline = create_docx_with_redlines(current_input, previous_output, {
+                "function": function,
+                "section": section_name,
+                "domain": domain,
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            })
+            st.download_button(
+                "📋 Redlining 修订",
+                redline,
+                file_name=f"xueyan_redline_{section_name}.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                key=f"redline_preview_{section_name}_{function}",
+            )
+        else:
+            st.caption("💡 修改类功能执行后可导出 Redlining")
+
+
+def handle_writing_process(section_name: str, function: str, domain: str, reference_styles: List[str]) -> None:
+    input_key = writing_input_key(section_name)
+    output_key = writing_output_key(section_name)
+    note_key = writing_note_key(section_name)
+    current_input = st.session_state.get(input_key, "")
+    if not current_input.strip():
+        st.warning("请先输入文本。")
         return
 
-    section_name = st.session_state.active_section
-    input_key = f"input_{section_name}"
-    if input_key in st.session_state:
-        return
+    input_lang = detect_language(current_input)
+    with st.spinner(f"🔄 处理中 [{function}] | 板块: {section_name} | 领域: {domain}..."):
+        protected_input, term_mapping = protect_hard_terms(current_input, domain)
+        full_prompt = create_strict_prompt(function, protected_input, section_name, domain, reference_styles, input_lang)
+        start_time = time.time()
+        response = call_api(full_prompt, timeout=300)
+        elapsed = time.time() - start_time
 
-    st.session_state[input_key] = pending_text
-    st.session_state.pending_import_text = ""
+        if function == "📝 中转英翻译":
+            output_lang = detect_language(response)
+            if output_lang == input_lang:
+                st.error("❌ 翻译校验失败：输出语言与输入相同，请重试")
+                return
+
+        final_output = restore_hard_terms(response, term_mapping)
+        st.session_state[output_key] = final_output
+        if function == "🤖 去AI味 (Humanizer)":
+            note_text = f"✅ 已针对【{section_name}】完成【{function}】，保持原语种，仅重构语序与节奏。"
+        elif function == "📝 中转英翻译":
+            note_text = f"✅ 已针对【{section_name}】完成【{function}】，已执行跨语种精准学术翻译并保留术语。"
+        else:
+            note_text = f"✅ 已针对【{section_name}】完成【{function}】，严格按单一职责执行。"
+        st.session_state[note_key] = note_text
+        st.session_state.writing_history.insert(0, {
+            "id": len(st.session_state.writing_history) + 1,
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "function": function,
+            "section": section_name,
+            "domain": domain,
+            "input_lang": input_lang,
+            "input": current_input,
+            "output": final_output,
+            "elapsed": f"{elapsed:.1f}s",
+        })
+        st.session_state.writing_history = st.session_state.writing_history[:100]
 
 
-def render_section(section_name: str) -> None:
-    apply_pending_import()
+def render_writing_section(section_name: str, function: str, domain: str, reference_styles: List[str]) -> None:
+    input_key = writing_input_key(section_name)
+    output_key = writing_output_key(section_name)
+    note_key = writing_note_key(section_name)
+    current_input = st.session_state.get(input_key, "")
+    previous_output = st.session_state.get(output_key, "")
+    previous_note = st.session_state.get(note_key, "")
 
-    # ── 主区域：左右分栏对比 ─────────────────────────────────────────────────
-    st.markdown("---")
     col_left, col_right = st.columns([1, 1], gap="large")
-
     with col_left:
         st.markdown("<div class='comparison-box'>", unsafe_allow_html=True)
         st.markdown(f"### 📝 原文输入 [{section_name}]")
-        input_key = f"input_{section_name}"
-        output_key = f"output_{section_name}"
-        note_key = f"note_{section_name}"
-        if input_key not in st.session_state:
-            st.session_state[input_key] = ""
-        current_input = st.text_area(
-            "",
+        st.text_area(
+            "原文输入",
+            value=current_input,
+            key=input_key,
             height=400,
             label_visibility="collapsed",
-            key=input_key,
         )
-
+        current_input = st.session_state.get(input_key, "")
         st.caption(f"📊 {len(current_input)} 字符 | 语言: {'中文' if detect_language(current_input) == 'zh' else '英文'}")
-
-        st.markdown("---")
-        btn_col1, btn_col2, btn_col3 = st.columns([3, 1, 1])
-        with btn_col1:
-            process_button = st.button(
-                f"✨ 执行 {function}",
-                type="primary",
-                use_container_width=True,
-                key=f"process_{section_name}"
-            )
-        with btn_col2:
+        btn1, btn2, btn3 = st.columns([3, 1, 1])
+        with btn1:
+            if st.button(f"✨ 执行 {function}", key=f"process_{section_name}", type="primary", use_container_width=True):
+                handle_writing_process(section_name, function, domain, reference_styles)
+                st.rerun()
+        with btn2:
             if st.button("🗑️", key=f"clear_{section_name}"):
                 st.session_state[input_key] = ""
                 st.session_state[output_key] = ""
                 st.session_state[note_key] = ""
-                st.session_state.pending_import_text = ""
                 st.rerun()
-        with btn_col3:
+        with btn3:
             if st.button("🔄", key=f"rerun_{section_name}"):
                 st.rerun()
-
         st.markdown("</div>", unsafe_allow_html=True)
 
     with col_right:
         st.markdown("<div class='comparison-box'>", unsafe_allow_html=True)
         st.markdown(f"### 👁️ 处理结果 [{section_name}]")
-        result_placeholder = st.empty()
-        modification_note = st.empty()
-
-        # 历史结果回显
-        previous_output = st.session_state.get(output_key, "")
-        previous_note = st.session_state.get(note_key, "")
-        modification_functions = ["📋 Redlining修订", "✨ 表达润色", "🤖 去AI味 (Humanizer)", "🎯 精修模式"]
         if previous_output:
-            st.markdown("<div class='result-toolbar'><strong>快捷操作</strong></div>", unsafe_allow_html=True)
-            preview_col1, preview_col2 = st.columns([1, 1])
-            with preview_col1:
-                st.download_button(
-                    "📋 下载结果.txt",
-                    previous_output.encode("utf-8"),
-                    file_name=f"yanyu_{section_name}_result.txt",
-                    mime="text/plain",
-                    key=f"download_txt_preview_{section_name}"
-                )
-            with preview_col2:
-                if function in modification_functions:
-                    preview_redline_bytes = create_docx_with_redlines(current_input, previous_output, {
-                        "function": function,
-                        "section": section_name,
-                        "domain": domain,
-                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    })
-                    st.download_button(
-                        "📋 Redlining 修订",
-                        preview_redline_bytes,
-                        file_name=f"yanyu_redline_{section_name}.docx",
-                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                        key=f"preview_redline_{section_name}"
-                    )
-                else:
-                    st.caption("💡 修改类功能执行后可导出 Redlining")
+            render_result_actions(section_name, st.session_state.get(input_key, ""), previous_output, function, domain)
             st.text_area(
                 "结果文本",
-                previous_output,
-                height=340,
+                value=previous_output,
                 key=f"result_preview_{section_name}",
+                height=340,
                 disabled=True,
                 label_visibility="collapsed",
             )
-        if previous_note:
-            modification_note.caption(previous_note)
-
-        if process_button and current_input.strip():
-            input_lang = detect_language(current_input)
-
-            with st.spinner(f"🔄 处理中 [{function}] | 板块: {section_name} | 领域: {domain} | 语言: {'中文' if input_lang == 'zh' else '英文'}..."):
-                try:
-                    # 硬锁保护
-                    protected_input, term_mapping = protect_hard_terms(current_input, domain)
-
-                    # 创建零篡位 prompt
-                    full_prompt = create_strict_prompt(
-                        function, protected_input, section_name, domain, reference_styles, input_lang
+            if previous_note:
+                st.caption(previous_note)
+            meta = {
+                "function": function,
+                "section": section_name,
+                "domain": domain,
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            }
+            export1, export2 = st.columns([1, 1])
+            with export1:
+                st.download_button(
+                    "📥 导出 Word",
+                    create_docx(previous_output, meta),
+                    file_name=f"xueyan_{section_name}.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    key=f"export_docx_{section_name}",
+                )
+            with export2:
+                if function in MODIFICATION_FUNCTIONS:
+                    st.download_button(
+                        "📋 导出 Redlining",
+                        create_docx_with_redlines(st.session_state.get(input_key, ""), previous_output, meta),
+                        file_name=f"xueyan_redline_{section_name}.docx",
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        key=f"export_redline_{section_name}",
                     )
-
-                    # 调用 API
-                    start_time = time.time()
-                    response = call_api(full_prompt, timeout=300)
-                    elapsed = time.time() - start_time
-
-                    if response:
-                        # 翻译功能结果校验
-                        if function == "📝 中转英翻译":
-                            output_lang = detect_language(response)
-                            if output_lang == input_lang:
-                                st.error("❌ 翻译校验失败：输出语言与输入相同，请重试")
-                                st.stop()
-
-                        # 恢复术语
-                        final_output = restore_hard_terms(response, term_mapping)
-
-                        # 保存到历史
-                        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        history_entry = {
-                            "id": len(st.session_state.history) + 1,
-                            "timestamp": timestamp,
-                            "function": function,
-                            "section": section_name,
-                            "domain": domain,
-                            "input_lang": input_lang,
-                            "input": current_input,
-                            "output": final_output,
-                            "elapsed": f"{elapsed:.1f}s"
-                        }
-                        st.session_state.history.insert(0, history_entry)
-                        st.session_state.history = st.session_state.history[:100]
-
-                        # 显示结果
-                        st.session_state[output_key] = final_output
-                        st.markdown("<div class='result-toolbar'><strong>快捷操作</strong></div>", unsafe_allow_html=True)
-                        st.text_area(
-                            "结果文本",
-                            final_output,
-                            height=340,
-                            key=f"result_live_{section_name}_{timestamp}",
-                            disabled=True,
-                            label_visibility="collapsed",
-                        )
-
-                        copy_col1, copy_col2 = st.columns([1, 1])
-                        with copy_col1:
-                            st.download_button(
-                                "📋 下载结果.txt",
-                                final_output.encode("utf-8"),
-                                file_name=f"yanyu_{section_name}_result.txt",
-                                mime="text/plain",
-                                key=f"download_txt_{section_name}_{timestamp}"
-                            )
-                        with copy_col2:
-                            if function in modification_functions:
-                                redline_preview_bytes = create_docx_with_redlines(current_input, final_output, {
-                                    "function": function,
-                                    "section": section_name,
-                                    "domain": domain,
-                                    "timestamp": timestamp
-                                })
-                                st.download_button(
-                                    "📋 Redlining 修订",
-                                    redline_preview_bytes,
-                                    file_name=f"yanyu_redline_{section_name}_{timestamp.replace(':', '-')}.docx",
-                                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                                    key=f"redline_preview_live_{section_name}_{timestamp}"
-                                )
-                            else:
-                                st.caption("💡 可直接复制右侧结果文本，或下载为 TXT")
-
-                        # 修改说明（单一职责提示）
-                        if function == "🤖 去AI味 (Humanizer)":
-                            note_text = f"✅ 已针对【{section_name}】完成【{function}】，保持原语种，仅重构语序与节奏。"
-                        elif function == "📝 中转英翻译":
-                            note_text = f"✅ 已针对【{section_name}】完成【{function}】，已执行跨语种学术翻译并保留术语。"
-                        else:
-                            note_text = f"✅ 已针对【{section_name}】完成【{function}】，严格按单一职责执行。"
-
-                        st.session_state[note_key] = note_text
-                        modification_note.caption(note_text)
-
-                        # 导出按钮（支持redlining）
-                        st.markdown("---")
-                        export_col1, export_col2 = st.columns([1, 1])
-
-                        # 标准导出
-                        doc_bytes = create_docx(final_output, {
-                            "function": function,
-                            "section": section_name,
-                            "domain": domain,
-                            "timestamp": timestamp
-                        })
-                        with export_col1:
-                            st.download_button(
-                                "📥 导出 Word",
-                                doc_bytes,
-                                file_name=f"yanyu_{section_name}_{timestamp.replace(':', '-')}.docx",
-                                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                            )
-
-                        # Redlining导出（仅限修改类功能）
-                        if function in ["✨ 表达润色", "🤖 去AI味 (Humanizer)", "🎯 精修模式"]:
-                            redline_bytes = create_docx_with_redlines(current_input, final_output, {
-                                "function": function,
-                                "section": section_name,
-                                "domain": domain,
-                                "timestamp": timestamp
-                            })
-                            with export_col2:
-                                st.download_button(
-                                    "📋 导出 Redlining",
-                                    redline_bytes,
-                                    file_name=f"yanyu_redline_{section_name}_{timestamp.replace(':', '-')}.docx",
-                                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                                )
-
-                except Exception as e:
-                    st.error(f"❌ 处理失败: {e}")
-                    if "timeout" in str(e).lower():
-                        st.warning("💡 建议：缩短文本或增加超时时间")
+        else:
+            st.info("处理结果将显示在这里。")
+        st.markdown("</div>", unsafe_allow_html=True)
 
 
-render_section(active_section)
+def render_writing_engine() -> None:
+    init_writing_state()
+    with st.sidebar:
+        st.markdown("---")
+        st.subheader("🎯 写作引擎")
+        function = st.selectbox("选择功能", list(FUNCTION_MATRIX.keys()), key="writing_function")
+        func_info = FUNCTION_MATRIX.get(function, {})
+        st.caption(func_info.get("description", ""))
+        for rule in func_info.get("rules", []):
+            st.caption(rule)
 
-# ── 版本时光机 ─────────────────────────────────────────────────────────────
+        domain = st.selectbox("研究领域", list(DOMAINS.keys()), key="writing_domain")
 
-st.markdown("---")
-st.subheader("⏰ 版本时光机")
+        st.markdown("---")
+        st.subheader("📚 影子合著者：标杆文献")
+        reference_files = st.file_uploader(
+            "上传标杆文献 (1-3篇)",
+            type=["pdf", "docx"],
+            accept_multiple_files=True,
+            key="writing_reference_files",
+        )
+        reference_styles: List[str] = []
+        if reference_files:
+            for ref_file in reference_files:
+                if ref_file.name not in st.session_state.writing_reference_docs:
+                    ref_bytes = ref_file.read()
+                    text = extract_text(ref_bytes, ref_file.name)
+                    if text and not text.startswith("解析"):
+                        st.session_state.writing_reference_docs[ref_file.name] = analyze_reference_paper(ref_bytes, ref_file.name)
+                if ref_file.name in st.session_state.writing_reference_docs:
+                    reference_styles.append(st.session_state.writing_reference_docs[ref_file.name])
+        if st.session_state.writing_reference_docs:
+            st.success(f"✅ 已加载 {len(st.session_state.writing_reference_docs)} 篇标杆文献")
 
-# 按板块筛选
-filter_section = st.selectbox(
-    "筛选板块",
-    ["全部"] + list(SECTIONS.keys()),
-    index=0
-)
-
-# 按功能筛选
-filter_function = st.selectbox(
-    "筛选功能",
-    ["全部"] + list(FUNCTION_MATRIX.keys()),
-    index=0
-)
-
-# 过滤历史
-filtered_history = st.session_state.history
-if filter_section != "全部":
-    filtered_history = [h for h in filtered_history if h["section"] == filter_section]
-if filter_function != "全部":
-    filtered_history = [h for h in filtered_history if h["function"] == filter_function]
-
-if filtered_history:
-    for entry in filtered_history[:20]:
-        with st.expander(
-            f"#{entry['id']} · {entry['function']} · {entry['section']} · {entry['timestamp']}",
-            expanded=False
-        ):
-            col1, col2, col3 = st.columns([3, 1, 1])
-            with col1:
-                st.caption(f"领域: {entry['domain']} | 语言: {'中文' if entry['input_lang'] == 'zh' else '英文'} | 耗时: {entry['elapsed']}")
-            with col2:
-                if st.button("📥 恢复", key=f"restore_{entry['id']}"):
-                    st.session_state.active_section = entry['section']
-                    target_input_key = f"input_{entry['section']}"
-                    st.session_state[target_input_key] = entry['input']
-                    st.session_state.pending_import_text = ""
-                    st.rerun()
-            with col3:
-                if st.button("🗑️", key=f"delete_{entry['id']}"):
-                    st.session_state.history = [h for h in st.session_state.history if h['id'] != entry['id']]
+        st.markdown("---")
+        st.subheader("📁 普通文件上传")
+        uploaded_file = st.file_uploader("上传待处理文件", type=["pdf", "docx"], key="writing_uploaded_file")
+        if uploaded_file:
+            uploaded_bytes = uploaded_file.read()
+            extracted = extract_text(uploaded_bytes, uploaded_file.name)
+            if extracted and not extracted.startswith("解析"):
+                st.success(f"✅ 提取 {len(extracted)} 字符")
+                if st.button("📥 填入当前板块", use_container_width=True, key="fill_current_section"):
+                    active = st.session_state.writing_active_section
+                    st.session_state[writing_input_key(active)] = extracted[:10000]
                     st.rerun()
 
-            # 对比视图
-            col_orig, col_out = st.columns(2)
-            with col_orig:
-                st.markdown("**原始输入**")
-                st.text_area("", entry['input'], height=150, key=f"orig_{entry['id']}", disabled=True)
-            with col_out:
-                st.markdown("**处理输出**")
-                st.markdown(entry['output'])
+        st.markdown("---")
+        preview = append_skill_preview()
+        st.caption(f"规则包：{', '.join(f'{k}={v}' for k, v in preview.items())}")
+
+    st.markdown("---")
+    tabs = st.tabs(SECTION_NAMES)
+    for section_name, tab in zip(SECTION_NAMES, tabs):
+        with tab:
+            st.session_state.writing_active_section = section_name
+            render_writing_section(section_name, function, domain, reference_styles)
+
+    st.markdown("---")
+    st.subheader("⏰ 版本时光机")
+    filter_section = st.selectbox("筛选板块", ["全部"] + list(SECTIONS.keys()), key="history_section_filter")
+    filter_function = st.selectbox("筛选功能", ["全部"] + list(FUNCTION_MATRIX.keys()), key="history_function_filter")
+    filtered_history = st.session_state.writing_history
+    if filter_section != "全部":
+        filtered_history = [h for h in filtered_history if h["section"] == filter_section]
+    if filter_function != "全部":
+        filtered_history = [h for h in filtered_history if h["function"] == filter_function]
+
+    if filtered_history:
+        for entry in filtered_history[:20]:
+            with st.expander(f"#{entry['id']} · {entry['function']} · {entry['section']} · {entry['timestamp']}"):
+                c1, c2, c3 = st.columns([3, 1, 1])
+                with c1:
+                    st.caption(f"领域: {entry['domain']} | 语言: {'中文' if entry['input_lang'] == 'zh' else '英文'} | 耗时: {entry['elapsed']}")
+                with c2:
+                    if st.button("📥 恢复", key=f"restore_{entry['id']}"):
+                        st.session_state[writing_input_key(entry['section'])] = entry['input']
+                        st.session_state[writing_output_key(entry['section'])] = entry['output']
+                        st.session_state[writing_note_key(entry['section'])] = f"已恢复 {entry['timestamp']} 的结果"
+                        st.rerun()
+                with c3:
+                    if st.button("🗑️", key=f"delete_{entry['id']}"):
+                        st.session_state.writing_history = [h for h in st.session_state.writing_history if h['id'] != entry['id']]
+                        st.rerun()
+                left, right = st.columns(2)
+                with left:
+                    st.markdown("**原始输入**")
+                    st.text_area("", entry["input"], height=150, key=f"orig_{entry['id']}", disabled=True)
+                with right:
+                    st.markdown("**处理输出**")
+                    st.text_area("", entry["output"], height=150, key=f"out_{entry['id']}", disabled=True)
+    else:
+        st.info("📭 暂无符合条件的记录")
+
+
+def render_formatting_engine() -> None:
+    with st.sidebar:
+        st.markdown("---")
+        st.subheader("📏 排版引擎")
+        st.caption("先审查，后修改。仅做样式级修复，不改正文逻辑与公式内容。")
+        st.caption("设计参考：thesis-skills 工作流思想 + python-docx 确定性修复。")
+
+    st.markdown("---")
+    left, middle, right = st.columns([1, 1, 1.2], gap="large")
+
+    with left:
+        st.markdown("<div class='engine-box'>", unsafe_allow_html=True)
+        st.markdown("### 📐 格式指南要求")
+        guideline_text = st.text_area(
+            "格式指南",
+            value=st.session_state.format_guideline_text,
+            height=360,
+            key="format_guideline_text",
+            placeholder="例如：一级标题黑体三号；正文宋体小四；行距20磅；页眉含校名；参考文献符合 GB/T 7714",
+        )
+        guideline_file = st.file_uploader("上传格式指南", type=["txt", "md", "docx"], key="guideline_file")
+        if st.button("🔍 解析指南", use_container_width=True, key="parse_guideline"):
+            file_bytes = guideline_file.read() if guideline_file else None
+            filename = guideline_file.name if guideline_file else ""
+            rules = parse_format_guidelines(guideline_text, file_bytes, filename)
+            st.session_state.format_guideline_summary = rules["summary"]
+            st.session_state.format_guideline_rules = rules
+            st.rerun()
+        if st.session_state.get("format_guideline_summary"):
+            st.success(st.session_state.format_guideline_summary)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    with middle:
+        st.markdown("<div class='engine-box'>", unsafe_allow_html=True)
+        st.markdown("### 📄 待改 Word 上传")
+        target_doc = st.file_uploader("上传待改 Word", type=["docx"], key="target_doc")
+        if target_doc:
+            st.info(f"已载入：{target_doc.name}")
+            extracted = extract_text(target_doc.read(), target_doc.name)
+            if extracted and not extracted.startswith("解析"):
+                st.text_area("正文预览", extracted[:3000], height=360, disabled=True, key="target_doc_preview")
+        st.caption("支持 .docx；当前版本优先修复标题、正文、页眉页脚、参考文献缩进等确定性样式问题。")
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    with right:
+        st.markdown("<div class='engine-box'>", unsafe_allow_html=True)
+        st.markdown("### 🔍 审查与修复区")
+        target_doc_for_audit = st.session_state.get("target_doc")
+        if st.button("🩺 开始审查", use_container_width=True, key="start_audit"):
+            if not guideline_text.strip() and not st.session_state.get("format_guideline_summary"):
+                st.warning("请先填写或解析格式指南。")
+            elif not target_doc:
+                st.warning("请先上传待改 Word。")
+            else:
+                target_bytes = target_doc.getvalue()
+                rules = st.session_state.get("format_guideline_rules") or parse_format_guidelines(guideline_text)
+                report = audit_docx_format(target_bytes, rules)
+                st.session_state.format_audit_report = report
+                st.session_state.format_fix_options = report.get("fix_options", [])
+                st.session_state.format_last_filename = target_doc.name
+                st.rerun()
+
+        audit_report = st.session_state.get("format_audit_report", {})
+        if audit_report:
+            st.success(create_format_audit_summary(audit_report))
+            for issue in audit_report.get("issues", []):
+                st.markdown(f"- {issue['detail']}")
+            labels = [item["label"] for item in audit_report.get("fix_options", [])]
+            selected = []
+            if labels:
+                st.markdown("---")
+                st.markdown("**可选修复项**")
+                for label in labels:
+                    if st.checkbox(label, value=True, key=f"fix_{label}"):
+                        selected.append(label)
+                if st.button("🛠️ 应用所选修复", use_container_width=True, key="apply_fixes"):
+                    if not target_doc:
+                        st.warning("请重新上传待改 Word。")
+                    else:
+                        rules = st.session_state.get("format_guideline_rules") or parse_format_guidelines(guideline_text)
+                        output_bytes = apply_docx_fixes(target_doc.getvalue(), rules, selected)
+                        st.session_state.format_output_docx_bytes = output_bytes
+                        st.rerun()
+
+        if st.session_state.get("format_output_docx_bytes"):
             st.markdown("---")
-else:
-    st.info("📭 暂无符合条件的记录")
+            st.download_button(
+                "📥 下载修复后 Word",
+                st.session_state.format_output_docx_bytes,
+                file_name=f"fixed_{st.session_state.get('format_last_filename') or 'document.docx'}",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                key="download_fixed_docx",
+            )
+            st.caption("仅对勾选项做样式级修复；正文逻辑、翻译与公式语义不会被改写。")
+        else:
+            st.info("先解析指南，再审查文档，最后勾选修复项导出。")
+        st.markdown("</div>", unsafe_allow_html=True)
 
-# ── Footer ─────────────────────────────────────────────────────────────────
 
-st.markdown("""
+def main() -> None:
+    render_header()
+    with st.sidebar:
+        st.markdown("---")
+        st.session_state.engine_mode = st.radio(
+            "核心引擎切换",
+            [WRITING_PAGE, FORMATTING_PAGE],
+            index=0 if st.session_state.engine_mode == WRITING_PAGE else 1,
+            key="engine_mode",
+        )
+
+    if st.session_state.engine_mode == WRITING_PAGE:
+        render_writing_engine()
+    else:
+        render_formatting_engine()
+
+    st.markdown(
+        """
 ---
 <div style="text-align: center; color: #64748b; font-size: 0.8rem; padding: 2rem 0;">
     <p><strong>🧪 学研·工科科研助手 v4.0</strong></p>
-    <p>15+功能矩阵 · 板块锚定 · 零篡位执行 · 影子合著者 · 语言基因深度提取</p>
-    <p>🔬 9大学科领域 · 📚 本地学术库集成 · ⏰ 版本时光机 · 📋 Redlining支持</p>
+    <p>双引擎架构 · 写作协作 OS · 确定性格式对齐 · Hugging Face 就绪</p>
 </div>
-""", unsafe_allow_html=True)
+""",
+        unsafe_allow_html=True,
+    )
+
+
+if __name__ == "__main__":
+    main()
