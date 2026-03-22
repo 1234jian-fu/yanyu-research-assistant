@@ -6,6 +6,7 @@
 import os
 import re
 import time
+import json
 from collections import Counter
 from copy import deepcopy
 from datetime import datetime
@@ -16,6 +17,7 @@ from typing import Dict, List, Tuple
 import anthropic
 import fitz  # pymupdf
 import streamlit as st
+import streamlit.components.v1 as components
 from docx import Document
 from docx.enum.section import WD_SECTION
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
@@ -687,7 +689,7 @@ def _set_run_font(run, font_name: str | None = None, size_pt: float | None = Non
         run.font.bold = bold
 
 
-def apply_docx_fixes(docx_bytes: bytes, guideline_rules: Dict, selected_fixes: List[str]) -> bytes:
+def apply_docx_fixes(docx_bytes: bytes, guideline_rules: Dict, selected_fixes: List[str], micro_tune_request: str = "") -> bytes:
     doc = Document(BytesIO(docx_bytes))
 
     if "对齐各级标题字体" in selected_fixes:
@@ -732,6 +734,37 @@ def apply_docx_fixes(docx_bytes: bytes, guideline_rules: Dict, selected_fixes: L
                 fmt.line_spacing_rule = WD_LINE_SPACING.EXACTLY
                 fmt.line_spacing = Pt(guideline_rules.get("line_spacing") or 20)
 
+    request_lower = micro_tune_request.lower().strip()
+    if request_lower:
+        if any(token in request_lower for token in ["页脚", "footer"]):
+            footer_size = 11 if any(token in request_lower for token in ["大", "bigger", "larger"]) else 9 if any(token in request_lower for token in ["小", "smaller"]) else 10
+            for section in doc.sections:
+                footer = section.footer
+                if not footer.paragraphs:
+                    footer.add_paragraph()
+                if not footer.paragraphs[0].text.strip():
+                    footer.paragraphs[0].text = "学研 · 格式微调"
+                footer.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                for run in footer.paragraphs[0].runs:
+                    _set_run_font(run, guideline_rules.get("body_font") or "宋体", footer_size)
+        if any(token in request_lower for token in ["页眉", "header"]):
+            header_size = 11 if any(token in request_lower for token in ["大", "bigger", "larger"]) else 9 if any(token in request_lower for token in ["小", "smaller"]) else 10
+            for section in doc.sections:
+                header = section.header
+                if not header.paragraphs:
+                    header.add_paragraph()
+                if not header.paragraphs[0].text.strip():
+                    header.paragraphs[0].text = "学研 · 确定性格式对齐"
+                header.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                for run in header.paragraphs[0].runs:
+                    _set_run_font(run, guideline_rules.get("body_font") or "宋体", header_size)
+        if any(token in request_lower for token in ["行距", "line spacing"]):
+            spacing_pt = 24 if any(token in request_lower for token in ["大", "更大", "larger"]) else 18 if any(token in request_lower for token in ["小", "更小", "smaller"]) else (guideline_rules.get("line_spacing") or 20)
+            for paragraph in doc.paragraphs:
+                if _paragraph_text(paragraph) and not _is_heading(paragraph):
+                    paragraph.paragraph_format.line_spacing_rule = WD_LINE_SPACING.EXACTLY
+                    paragraph.paragraph_format.line_spacing = Pt(spacing_pt)
+
     buffer = BytesIO()
     doc.save(buffer)
     buffer.seek(0)
@@ -761,6 +794,27 @@ def build_format_audit_table(audit_report: Dict) -> str:
             f"| {issue['label']} | {status} | {issue['detail']} |"
         )
     return "\n".join(rows)
+
+
+def render_copy_text(text: str, key: str) -> None:
+    payload = json.dumps(text)
+    components.html(
+        f"""
+        <script>
+        const text = {payload};
+        const btn = window.parent.document.getElementById('{key}');
+        if (btn && !btn.dataset.copyBound) {{
+            btn.dataset.copyBound = '1';
+            btn.addEventListener('click', async () => {{
+                try {{
+                    await navigator.clipboard.writeText(text);
+                }} catch (e) {{}}
+            }});
+        }}
+        </script>
+        """,
+        height=0,
+    )
 
 
 # ── UI 样式 ──────────────────────────────────────────────────────────────────
@@ -928,10 +982,12 @@ def render_header() -> None:
 
 def render_result_actions(section_name: str, current_input: str, previous_output: str, function: str, domain: str) -> None:
     st.markdown("<div class='result-toolbar'><strong>快捷操作</strong></div>", unsafe_allow_html=True)
+    copy_button_id = f"copy_result_btn_{section_name}_{function}".replace(" ", "_")
     col1, col2 = st.columns([1, 1])
     with col1:
-        if st.button("📋 复制结果", key=f"copy_preview_{section_name}_{function}", use_container_width=True):
-            st.toast("结果已复制到剪贴板候选区")
+        render_copy_text(previous_output, copy_button_id)
+        if st.button("📋 复制结果", key=copy_button_id, use_container_width=True):
+            st.toast("结果已复制到系统剪贴板")
         st.download_button(
             "📄 下载结果.txt",
             previous_output.encode("utf-8"),
@@ -1459,7 +1515,12 @@ def render_formatting_engine() -> None:
                                 status.write("正在加载格式修复规则")
                                 rules = st.session_state.get("format_guideline_rules") or parse_format_guidelines(guideline_text)
                                 status.write("正在应用所选修复项")
-                                output_bytes = apply_docx_fixes(target_doc.getvalue(), rules, selected)
+                                output_bytes = apply_docx_fixes(
+                                    target_doc.getvalue(),
+                                    rules,
+                                    selected,
+                                    st.session_state.get("format_micro_tune_request", ""),
+                                )
                                 status.write("正在生成修复后文档")
                                 st.session_state.format_output_docx_bytes = output_bytes
                                 status.update(label="修复完成", state="complete", expanded=False)
