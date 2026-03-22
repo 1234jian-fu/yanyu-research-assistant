@@ -628,6 +628,7 @@ VIZ_DEFAULT_STATE = {
     "prompt_without_labels": "",
     "compact_prompt": "",
     "expanded_prompt": "",
+    "final_prompt": "",
     "current_image_url": "",
     "current_image_bytes": b"",
     "current_result_id": None,
@@ -1335,7 +1336,14 @@ def build_viz_logic_summary(viz_state: dict) -> str:
     scene = viz_state.get("scene", "未指定场景")
     style = viz_state.get("style", "未指定风格")
     label_mode = viz_state.get("label_mode", "未指定标注模式")
-    return f"材料：{material_text}｜组成：{components_text}｜用途：{usage}｜场景：{scene}｜风格：{style}｜标注：{label_mode}"
+    label_language = viz_state.get("label_language", "未指定标签语言") if label_mode == "有文字版" else "关闭"
+    final_language_rule = "仅允许中文标签" if label_mode == "有文字版" and label_language == "中文" else (
+        "仅允许英文标签" if label_mode == "有文字版" and label_language == "英文" else "禁止任何文字标签"
+    )
+    return (
+        f"材料：{material_text}｜组成：{components_text}｜用途：{usage}｜场景：{scene}｜风格：{style}｜标注：{label_mode}"
+        f"｜标签语言：{label_language}｜最终语言约束：{final_language_rule}"
+    )
 
 
 def build_viz_prompt_bundle(viz_state: dict) -> dict:
@@ -1348,8 +1356,10 @@ def build_viz_prompt_bundle(viz_state: dict) -> dict:
     emphasis_text = viz_state.get("emphasis_points_text", "").strip() or "highlight the main scientific message clearly"
     structure_notes = viz_state.get("structure_notes", "").strip() or "maintain accurate structural relationships"
     description_text = viz_state.get("description", "").strip() or "show the target scientific content clearly"
-    info_density = viz_state.get("info_density", "中")
+    info_density_map = {"低": "low", "中": "medium", "高": "high"}
+    info_density = info_density_map.get(viz_state.get("info_density", "中"), "medium")
     aspect_ratio = viz_state.get("aspect_ratio", "1:1")
+    label_mode = viz_state.get("label_mode", "无文字版")
     label_language = "Chinese" if viz_state.get("label_language") == "中文" else "English"
 
     base_prompt = (
@@ -1363,30 +1373,31 @@ def build_viz_prompt_bundle(viz_state: dict) -> dict:
         f"Description: {description_text}. "
         f"Information density: {info_density}. "
         f"Aspect ratio: {aspect_ratio}. "
-        "High resolution, academic journal quality."
+        "High resolution, academic journal quality. "
+        "Ensure strong composition hierarchy, clear scientific storytelling, clean background, accurate material relationships, "
+        "professional color usage, and visual focus on the core scientific message."
     )
 
     prompt_with_labels = (
         f"{base_prompt} "
-        f"Add concise {label_language} labels only where necessary. "
-        "Labels must be publication-style, clean, minimal, and embedded naturally into the figure."
+        f"Use {label_language} labels only. "
+        f"All visible labels, annotations, legends, arrows, and callouts must be written in {label_language}. "
+        "Labels must be concise, publication-style, clean, minimal, and embedded naturally into the figure. "
+        "Do not mix multiple languages in one image."
     )
     prompt_without_labels = (
         f"{base_prompt} "
-        "Do not include any text labels, titles, legends, letters, or annotations in the image."
+        "Do not include any text labels, titles, legends, letters, annotations, or language characters in the image."
     )
+    final_prompt = prompt_with_labels if label_mode == "有文字版" else prompt_without_labels
     compact_prompt = f"{style_text}; {material_text}; {components_text}; {scene_text}; {description_text}; academic journal quality"
-    expanded_prompt = (
-        f"{prompt_with_labels if viz_state.get('label_mode') == '有文字版' else prompt_without_labels} "
-        "Ensure strong composition hierarchy, clear scientific storytelling, clean background, accurate material relationships, "
-        "professional color usage, and visual focus on the core scientific message."
-    )
     return {
         "base_prompt": base_prompt,
         "prompt_with_labels": prompt_with_labels,
         "prompt_without_labels": prompt_without_labels,
         "compact_prompt": compact_prompt,
-        "expanded_prompt": expanded_prompt,
+        "expanded_prompt": final_prompt,
+        "final_prompt": final_prompt,
     }
 
 
@@ -1593,6 +1604,7 @@ def append_viz_history_entry(viz_state: dict, prompt_used: str, iteration_instru
         "prompt_without_labels": viz_state.get("prompt_without_labels", ""),
         "compact_prompt": viz_state.get("compact_prompt", ""),
         "expanded_prompt": viz_state.get("expanded_prompt", ""),
+        "final_prompt": viz_state.get("final_prompt", ""),
         "image_url": viz_state.get("current_image_url", ""),
         "image_bytes": viz_state.get("current_image_bytes", b""),
         "iteration_instruction": iteration_instruction,
@@ -1620,7 +1632,7 @@ def restore_viz_history_entry(viz_state: dict, entry_id: str) -> None:
         for key in [
             "material_name", "component_tags_text", "usage", "scene", "style", "emphasis_points_text", "structure_notes",
             "description", "label_mode", "label_language", "info_density", "aspect_ratio", "logic_summary", "base_prompt",
-            "prompt_with_labels", "prompt_without_labels", "compact_prompt", "expanded_prompt", "local_area_hint",
+            "prompt_with_labels", "prompt_without_labels", "compact_prompt", "expanded_prompt", "final_prompt", "local_area_hint",
             "inpaint_strength", "preserve_composition", "edit_mode", "iteration_mode", "seed_value", "current_seed", "current_image_seed",
             "style_reference_image", "style_reference_name", "style_strength"
         ]:
@@ -3122,15 +3134,15 @@ def render_viz_engine() -> None:
         viz_state.update(prompt_bundle)
 
         st.markdown("### Prompt 控制台")
-        tab1, tab2, tab3, tab4 = st.tabs(["当前 Prompt", "无文字版", "有文字版", "扩展版"])
+        tab1, tab2, tab3, tab4 = st.tabs(["最终 Prompt", "无文字版", "有文字版", "基础版"])
         with tab1:
-            st.code(viz_state["base_prompt"], language="text")
+            st.code(viz_state["final_prompt"], language="text")
         with tab2:
             st.code(viz_state["prompt_without_labels"], language="text")
         with tab3:
             st.code(viz_state["prompt_with_labels"], language="text")
         with tab4:
-            st.code(viz_state["expanded_prompt"], language="text")
+            st.code(viz_state["base_prompt"], language="text")
 
         action_col1, action_col2, action_col3 = st.columns([1, 1, 2])
         with action_col1:
@@ -3146,7 +3158,7 @@ def render_viz_engine() -> None:
             elif not GEMINI_API_KEY:
                 st.error("未配置 GEMINI_API_KEY。")
             else:
-                prompt_to_use = viz_state["prompt_with_labels"] if viz_state.get("label_mode") == "有文字版" else viz_state["prompt_without_labels"]
+                prompt_to_use = viz_state.get("final_prompt") or (viz_state["prompt_with_labels"] if viz_state.get("label_mode") == "有文字版" else viz_state["prompt_without_labels"])
                 viz_state["base_prompt"] = prompt_to_use
                 viz_state["generation_counter"] += 1
                 viz_state["current_parent_id"] = None if generate_clicked else viz_state.get("current_parent_id")
