@@ -1020,7 +1020,21 @@ st.markdown("""
         box-shadow: 0 10px 25px rgba(30, 58, 138, 0.2);
     }
     .section-tab { background: white; padding: 0.5rem 1rem; border-radius: 8px; font-weight: 600; }
-    .comparison-box { background: white; padding: 1.5rem; border-radius: 8px; border-left: 4px solid #3b82f6; min-height: 400px; }
+    .comparison-box {
+        background: white;
+        padding: 1rem 1rem 1.25rem 1rem;
+        border-radius: 12px;
+        border: 1px solid #dbe4f0;
+        min-height: 540px;
+        box-shadow: 0 6px 18px rgba(15, 23, 42, 0.05);
+    }
+    .result-toolbar {
+        margin: 0.75rem 0 0.25rem 0;
+        padding: 0.75rem;
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 10px;
+    }
     .stButton>button[kind="primary"] {
         background: linear-gradient(135deg, #2563eb, #3b82f6);
         color: white; border: none; padding: 0.75rem 2rem;
@@ -1160,9 +1174,10 @@ def render_section(section_name: str) -> None:
 
     # ── 主区域：左右分栏对比 ─────────────────────────────────────────────────
     st.markdown("---")
-    col_left, col_right = st.columns([1, 1])
+    col_left, col_right = st.columns([1, 1], gap="large")
 
     with col_left:
+        st.markdown("<div class='comparison-box'>", unsafe_allow_html=True)
         st.markdown(f"### 📝 原文输入 [{section_name}]")
         input_key = f"input_{section_name}"
         output_key = f"output_{section_name}"
@@ -1198,7 +1213,10 @@ def render_section(section_name: str) -> None:
             if st.button("🔄", key=f"rerun_{section_name}"):
                 st.rerun()
 
+        st.markdown("</div>", unsafe_allow_html=True)
+
     with col_right:
+        st.markdown("<div class='comparison-box'>", unsafe_allow_html=True)
         st.markdown(f"### 👁️ 处理结果 [{section_name}]")
         result_placeholder = st.empty()
         modification_note = st.empty()
@@ -1206,8 +1224,43 @@ def render_section(section_name: str) -> None:
         # 历史结果回显
         previous_output = st.session_state.get(output_key, "")
         previous_note = st.session_state.get(note_key, "")
+        modification_functions = ["📋 Redlining修订", "✨ 表达润色", "🤖 去AI味 (Humanizer)", "🎯 精修模式"]
         if previous_output:
-            result_placeholder.markdown(previous_output)
+            st.markdown("<div class='result-toolbar'><strong>快捷操作</strong></div>", unsafe_allow_html=True)
+            preview_col1, preview_col2 = st.columns([1, 1])
+            with preview_col1:
+                st.download_button(
+                    "📋 下载结果.txt",
+                    previous_output.encode("utf-8"),
+                    file_name=f"yanyu_{section_name}_result.txt",
+                    mime="text/plain",
+                    key=f"download_txt_preview_{section_name}"
+                )
+            with preview_col2:
+                if function in modification_functions:
+                    preview_redline_bytes = create_docx_with_redlines(current_input, previous_output, {
+                        "function": function,
+                        "section": section_name,
+                        "domain": domain,
+                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    })
+                    st.download_button(
+                        "📋 Redlining 修订",
+                        preview_redline_bytes,
+                        file_name=f"yanyu_redline_{section_name}.docx",
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        key=f"preview_redline_{section_name}"
+                    )
+                else:
+                    st.caption("💡 修改类功能执行后可导出 Redlining")
+            st.text_area(
+                "结果文本",
+                previous_output,
+                height=340,
+                key=f"result_preview_{section_name}",
+                disabled=True,
+                label_visibility="collapsed",
+            )
         if previous_note:
             modification_note.caption(previous_note)
 
@@ -1258,7 +1311,15 @@ def render_section(section_name: str) -> None:
 
                         # 显示结果
                         st.session_state[output_key] = final_output
-                        result_placeholder.markdown(final_output)
+                        st.markdown("<div class='result-toolbar'><strong>快捷操作</strong></div>", unsafe_allow_html=True)
+                        st.text_area(
+                            "结果文本",
+                            final_output,
+                            height=340,
+                            key=f"result_live_{section_name}_{timestamp}",
+                            disabled=True,
+                            label_visibility="collapsed",
+                        )
 
                         copy_col1, copy_col2 = st.columns([1, 1])
                         with copy_col1:
@@ -1270,7 +1331,22 @@ def render_section(section_name: str) -> None:
                                 key=f"download_txt_{section_name}_{timestamp}"
                             )
                         with copy_col2:
-                            st.caption("💡 可直接复制右侧结果文本，或下载为 TXT")
+                            if function in modification_functions:
+                                redline_preview_bytes = create_docx_with_redlines(current_input, final_output, {
+                                    "function": function,
+                                    "section": section_name,
+                                    "domain": domain,
+                                    "timestamp": timestamp
+                                })
+                                st.download_button(
+                                    "📋 Redlining 修订",
+                                    redline_preview_bytes,
+                                    file_name=f"yanyu_redline_{section_name}_{timestamp.replace(':', '-')}.docx",
+                                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                    key=f"redline_preview_live_{section_name}_{timestamp}"
+                                )
+                            else:
+                                st.caption("💡 可直接复制右侧结果文本，或下载为 TXT")
 
                         # 修改说明（单一职责提示）
                         if function == "🤖 去AI味 (Humanizer)":
@@ -1285,7 +1361,7 @@ def render_section(section_name: str) -> None:
 
                         # 导出按钮（支持redlining）
                         st.markdown("---")
-                        export_col1, export_col2 = st.columns(2)
+                        export_col1, export_col2 = st.columns([1, 1])
 
                         # 标准导出
                         doc_bytes = create_docx(final_output, {
