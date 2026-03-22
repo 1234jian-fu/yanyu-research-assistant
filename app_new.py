@@ -40,6 +40,11 @@ FORMATTING_PAGE = "📏 确定性格式对齐"
 SECTION_NAMES = ["摘要", "引言", "方法", "结果", "讨论", "结论"]
 MODIFICATION_FUNCTIONS = {"📋 Redlining修订", "✨ 表达润色", "🤖 去AI味 (Humanizer)", "🎯 精修模式"}
 SHADOW_FUNCTIONS = {"✍️ 逐段起草", "💡 研究想法构思", "📄 节节头脑风暴", "✍️ 影子写作"}
+FUNCTION_GROUPS = {
+    "基础润色类": ["✨ 表达润色", "📝 中转英翻译", "🤖 去AI味 (Humanizer)", "📋 Redlining修订"],
+    "深度分析类": ["🔍 逻辑检查", "👨‍⚖️ Reviewer视角", "📝 引用验证", "🎨 图表规范检查", "🔄 版本对比"],
+    "深度写作类": ["✍️ 逐段起草", "✍️ 影子写作", "🎯 精修模式", "📄 节节头脑风暴", "💡 研究想法构思", "🧠 ML论文写作"],
+}
 
 DEFAULT_STATES = {
     "engine_mode": WRITING_PAGE,
@@ -47,12 +52,15 @@ DEFAULT_STATES = {
     "writing_history": [],
     "writing_reference_docs": {},
     "writing_import_targets": {},
+    "writing_function": "✨ 表达润色",
     "format_guideline_text": "",
     "format_guideline_summary": "",
+    "format_guideline_rules": {},
     "format_audit_report": {},
     "format_fix_options": [],
     "format_output_docx_bytes": b"",
     "format_last_filename": "",
+    "format_micro_tune_request": "",
 }
 
 for key, default in DEFAULT_STATES.items():
@@ -738,31 +746,156 @@ def create_format_audit_summary(audit_report: Dict) -> str:
     )
 
 
+def build_format_audit_table(audit_report: Dict) -> str:
+    issues = audit_report.get("issues", [])
+    if not issues:
+        return "| 检查项 | 状态 | 改进建议 |\n| --- | --- | --- |\n| 格式审计 | ✅ 通过 | 未发现需要修复的样式问题。 |"
+
+    rows = ["| 检查项 | 状态 | 改进建议 |", "| --- | --- | --- |"]
+    for issue in issues:
+        rows.append(
+            f"| {issue['label']} | ⚠️ 待处理 | {issue['detail']} |"
+        )
+    return "\n".join(rows)
+
+
 # ── UI 样式 ──────────────────────────────────────────────────────────────────
 st.markdown(
     """
 <style>
-    .stApp { background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%); }
+    .stApp {
+        background:
+            radial-gradient(circle at top left, rgba(59, 130, 246, 0.10), transparent 28%),
+            linear-gradient(180deg, #f3f6fb 0%, #eef3f9 100%);
+    }
+    .block-container {
+        padding-top: 1.1rem;
+        padding-bottom: 1.4rem;
+    }
     .main-header {
-        text-align: center; padding: 2rem 0;
-        background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%);
-        color: white; border-radius: 12px; margin-bottom: 1.5rem;
-        box-shadow: 0 10px 25px rgba(30, 58, 138, 0.2);
+        text-align: left;
+        padding: 1rem 1.2rem;
+        background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 72%, #2563eb 100%);
+        color: white;
+        border-radius: 16px;
+        margin-bottom: 0.9rem;
+        box-shadow: 0 16px 38px rgba(15, 23, 42, 0.16);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        position: relative;
+        overflow: hidden;
+    }
+    .main-header::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(120deg, rgba(255,255,255,0.10), transparent 42%, transparent 58%, rgba(255,255,255,0.08));
+        pointer-events: none;
+    }
+    .main-header h1 {
+        margin: 0;
+        font-size: 1.7rem;
+        letter-spacing: 0.01em;
+    }
+    .main-header p {
+        margin: 0.3rem 0 0 0;
+        opacity: 0.88;
+        font-size: 0.92rem;
+    }
+    .comparison-box, .engine-box, .workbench-card, .dashboard-stat {
+        background: rgba(255, 255, 255, 0.94);
+        border-radius: 14px;
+        border: 1px solid #d8e1ee;
+        box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
     }
     .comparison-box, .engine-box {
-        background: white;
-        padding: 1rem 1rem 1.25rem 1rem;
-        border-radius: 12px;
-        border: 1px solid #dbe4f0;
+        padding: 1rem 1rem 1.1rem 1rem;
         min-height: 520px;
-        box-shadow: 0 6px 18px rgba(15, 23, 42, 0.05);
+    }
+    .workbench-card {
+        padding: 0.9rem 1rem;
+        margin-bottom: 0.9rem;
+    }
+    .workbench-title {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 1rem;
+        margin-bottom: 0.7rem;
+    }
+    .workbench-title h3 {
+        margin: 0;
+        color: #0f172a;
+        font-size: 1.05rem;
+    }
+    .workbench-title p {
+        margin: 0.28rem 0 0 0;
+        color: #475569;
+        font-size: 0.86rem;
+    }
+    .workbench-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        padding: 0.22rem 0.58rem;
+        border-radius: 999px;
+        background: #dbeafe;
+        color: #1d4ed8;
+        font-size: 0.76rem;
+        font-weight: 600;
+        white-space: nowrap;
+    }
+    .dashboard-stat {
+        padding: 0.78rem 0.9rem;
+        min-height: 104px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+    }
+    .dashboard-stat-label {
+        font-size: 0.74rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #64748b;
+        margin-bottom: 0.4rem;
+    }
+    .dashboard-stat-value {
+        font-size: 1rem;
+        font-weight: 700;
+        color: #0f172a;
+        line-height: 1.3;
+    }
+    .dashboard-stat-meta {
+        font-size: 0.8rem;
+        color: #475569;
+        margin-top: 0.3rem;
     }
     .result-toolbar {
-        margin: 0.75rem 0 0.25rem 0;
-        padding: 0.75rem;
+        margin: 0.65rem 0 0.2rem 0;
+        padding: 0.7rem 0.8rem;
         background: #f8fafc;
         border: 1px solid #e2e8f0;
         border-radius: 10px;
+    }
+    .sidebar-section-note {
+        font-size: 0.8rem;
+        color: #64748b;
+        margin-bottom: 0.2rem;
+    }
+    div.stButton > button, div.stDownloadButton > button {
+        margin: 0.15rem 0.28rem 0.55rem 0;
+        border-radius: 10px;
+    }
+    .stTextArea textarea {
+        font-family: "Iosevka Term", "Sarasa Mono SC", "Noto Serif CJK SC", "Source Han Serif SC", serif;
+        line-height: 1.72;
+        font-size: 0.96rem;
+    }
+    .format-chat-anchor {
+        position: sticky;
+        bottom: 0.75rem;
+        z-index: 20;
+        padding-top: 0.75rem;
+        background: linear-gradient(180deg, rgba(243,246,251,0) 0%, rgba(243,246,251,0.92) 35%, rgba(243,246,251,1) 100%);
     }
 </style>
 """,
@@ -774,13 +907,13 @@ def render_header() -> None:
     st.markdown(
         """
 <div class="main-header">
-    <h1>🧪 学研·工科科研助手 v4.0</h1>
-    <p style="margin: 0.5rem 0 0 0; opacity: 0.9;">双引擎架构 · 15+功能矩阵 · 影子写作 · 确定性格式对齐</p>
+    <h1>学研 · Xueyan Workstation</h1>
+    <p>双引擎科研工作台 · 写作协作与确定性排版在同一界面内完成</p>
 </div>
 """,
         unsafe_allow_html=True,
     )
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3 = st.columns(3, gap="small")
     with col1:
         st.success("✅ API 就绪" if CLAUDE_API_KEY else "❌ API 未配置")
     with col2:
@@ -829,16 +962,22 @@ def handle_writing_process(section_name: str, function: str, domain: str, refere
         return
 
     input_lang = detect_language(current_input)
-    with st.spinner(f"🔄 处理中 [{function}] | 板块: {section_name} | 领域: {domain}..."):
+    with st.status("处理中...", expanded=True) as status:
+        status.write(f"已锁定板块：{section_name}")
+        status.write(f"正在应用功能：{function}")
+        status.write(f"正在保护术语与 LaTeX：{domain}")
         protected_input, term_mapping = protect_hard_terms(current_input, domain)
         full_prompt = create_strict_prompt(function, protected_input, section_name, domain, reference_styles, input_lang)
+        status.write("正在调用写作引擎")
         start_time = time.time()
         response = call_api(full_prompt, timeout=300)
         elapsed = time.time() - start_time
+        status.write("正在恢复受保护术语")
 
         if function == "📝 中转英翻译":
             output_lang = detect_language(response)
             if output_lang == input_lang:
+                status.update(label="处理失败", state="error", expanded=True)
                 st.error("❌ 翻译校验失败：输出语言与输入相同，请重试")
                 return
 
@@ -863,7 +1002,7 @@ def handle_writing_process(section_name: str, function: str, domain: str, refere
             "elapsed": f"{elapsed:.1f}s",
         })
         st.session_state.writing_history = st.session_state.writing_history[:100]
-
+        status.update(label="处理完成", state="complete", expanded=False)
 
 def render_writing_section(section_name: str, function: str, domain: str, reference_styles: List[str]) -> None:
     input_key = writing_input_key(section_name)
@@ -951,8 +1090,25 @@ def render_writing_engine() -> None:
     with st.sidebar:
         st.markdown("---")
         st.subheader("🎯 写作引擎")
-        function = st.selectbox("选择功能", list(FUNCTION_MATRIX.keys()), key="writing_function")
+        st.caption("学术工作台模式：功能分组收纳，减少视觉噪音。")
+
+        current_function = st.session_state.get("writing_function", list(FUNCTION_MATRIX.keys())[0])
+        for group_name, group_functions in FUNCTION_GROUPS.items():
+            with st.expander(group_name, expanded=current_function in group_functions):
+                selected = st.radio(
+                    f"{group_name} 功能",
+                    group_functions,
+                    key=f"writing_group_{group_name}",
+                    index=group_functions.index(current_function) if current_function in group_functions else 0,
+                    label_visibility="collapsed",
+                )
+                if selected != st.session_state.get("writing_function"):
+                    st.session_state.writing_function = selected
+                    st.rerun()
+
+        function = st.session_state.get("writing_function", list(FUNCTION_MATRIX.keys())[0])
         func_info = FUNCTION_MATRIX.get(function, {})
+        st.markdown("<div class='sidebar-section-note'>当前功能说明</div>", unsafe_allow_html=True)
         st.caption(func_info.get("description", ""))
         for rule in func_info.get("rules", []):
             st.caption(rule)
@@ -997,7 +1153,80 @@ def render_writing_engine() -> None:
         preview = append_skill_preview()
         st.caption(f"规则包：{', '.join(f'{k}={v}' for k, v in preview.items())}")
 
-    st.markdown("---")
+    active_section = st.session_state.get("writing_active_section", "摘要")
+    history_count = len(st.session_state.writing_history)
+    reference_count = len(st.session_state.writing_reference_docs)
+    focus_hint = SECTIONS.get(active_section, {}).get("focus", "聚焦学术表达")
+
+    st.markdown(
+        f"""
+<div class="workbench-card">
+    <div class="workbench-title">
+        <div>
+            <h3>写作引擎工作台</h3>
+            <p>围绕当前板块进行紧凑写作、润色与影子协作，避免无效留白。</p>
+        </div>
+        <span class="workbench-chip">当前板块 · {active_section}</span>
+    </div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
+    stat1, stat2, stat3, stat4 = st.columns(4, gap="small")
+    with stat1:
+        st.markdown(
+            f"""
+<div class="dashboard-stat">
+    <div>
+        <div class="dashboard-stat-label">Current Mode</div>
+        <div class="dashboard-stat-value">{function}</div>
+    </div>
+    <div class="dashboard-stat-meta">{func_info.get('description', '学术写作处理')}</div>
+</div>
+""",
+            unsafe_allow_html=True,
+        )
+    with stat2:
+        st.markdown(
+            f"""
+<div class="dashboard-stat">
+    <div>
+        <div class="dashboard-stat-label">Research Domain</div>
+        <div class="dashboard-stat-value">{domain}</div>
+    </div>
+    <div class="dashboard-stat-meta">焦点：{DOMAINS.get(domain, {}).get('focus', '科研表达')}</div>
+</div>
+""",
+            unsafe_allow_html=True,
+        )
+    with stat3:
+        st.markdown(
+            f"""
+<div class="dashboard-stat">
+    <div>
+        <div class="dashboard-stat-label">Active Section</div>
+        <div class="dashboard-stat-value">{active_section}</div>
+    </div>
+    <div class="dashboard-stat-meta">写作提示：{focus_hint}</div>
+</div>
+""",
+            unsafe_allow_html=True,
+        )
+    with stat4:
+        st.markdown(
+            f"""
+<div class="dashboard-stat">
+    <div>
+        <div class="dashboard-stat-label">Workspace Assets</div>
+        <div class="dashboard-stat-value">历史 {history_count} · 文献 {reference_count}</div>
+    </div>
+    <div class="dashboard-stat-meta">工作台已载入参考与版本资产</div>
+</div>
+""",
+            unsafe_allow_html=True,
+        )
+
     tabs = st.tabs(SECTION_NAMES)
     for section_name, tab in zip(SECTION_NAMES, tabs):
         with tab:
