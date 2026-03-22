@@ -1144,7 +1144,7 @@ def main() -> None:
     render_header()
     with st.sidebar:
         st.markdown("---")
-        st.session_state.engine_mode = st.radio(
+        st.radio(
             "核心引擎切换",
             [WRITING_PAGE, FORMATTING_PAGE],
             index=0 if st.session_state.engine_mode == WRITING_PAGE else 1,
