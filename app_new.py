@@ -1644,6 +1644,13 @@ def render_viz_image_slot(image_url: str = "", empty_text: str = "尚未生成�
     st.html(html)
 
 
+def normalize_gemini_prompt(prompt: str) -> str:
+    cleaned = (prompt or "").replace("\r", " ").replace("\n", " ")
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    cleaned = cleaned.replace("“", '"').replace("”", '"').replace("‘", "'").replace("’", "'")
+    return cleaned
+
+
 def call_gemini_image(
     prompt: str,
     aspect_ratio: str = "1:1",
@@ -1654,7 +1661,8 @@ def call_gemini_image(
     style_reference_image: dict | None = None,
     style_strength: float | None = None,
 ) -> tuple[str, bytes | None, int | None]:
-    parts = [{"text": prompt}]
+    safe_prompt = normalize_gemini_prompt(prompt)
+    parts = [{"text": safe_prompt}]
     if reference_image_bytes:
         parts.append({
             "inline_data": {
@@ -1669,23 +1677,27 @@ def call_gemini_image(
                 "data": base64.b64encode(style_reference_image["bytes"]).decode("utf-8"),
             }
         })
-    generation_config = {
-        "responseModalities": ["TEXT", "IMAGE"],
-        "imageConfig": {
-            "aspectRatio": aspect_ratio,
-            "imageSize": "1K",
+
+    text_only_payload = {
+        "contents": [{"parts": [{"text": safe_prompt}]}],
+        "generationConfig": {
+            "responseModalities": ["TEXT", "IMAGE"],
+            "imageConfig": {
+                "aspectRatio": aspect_ratio,
+                "imageSize": "1K",
+            },
         },
     }
     if seed is not None:
-        generation_config["seed"] = seed
-    if strength is not None:
-        generation_config["imageStrength"] = strength
-    if style_reference_image and style_reference_image.get("bytes"):
-        generation_config["styleStrength"] = style_strength if style_strength is not None else 0.6
-    payload = {
-        "contents": [{"parts": parts}],
-        "generationConfig": generation_config,
-    }
+        text_only_payload["generationConfig"]["seed"] = seed
+
+    payload = deepcopy(text_only_payload)
+    if reference_image_bytes or (style_reference_image and style_reference_image.get("bytes")):
+        payload["contents"] = [{"parts": parts}]
+        if strength is not None:
+            payload["generationConfig"]["imageStrength"] = strength
+        if style_reference_image and style_reference_image.get("bytes"):
+            payload["generationConfig"]["styleStrength"] = style_strength if style_strength is not None else 0.6
     headers = {
         "Content-Type": "application/json",
         "X-goog-api-key": GEMINI_API_KEY,
@@ -1701,19 +1713,17 @@ def call_gemini_image(
         resp.raise_for_status()
         return resp
 
+    data = None
+    effective_seed = seed
     try:
         resp = _post_with_payload(payload)
+        data = resp.json()
     except requests.HTTPError:
-        fallback_payload = deepcopy(payload)
-        fallback_config = fallback_payload.get("generationConfig", {})
-        fallback_config.pop("imageStrength", None)
-        fallback_config.pop("seed", None)
+        fallback_payload = deepcopy(text_only_payload)
         resp = _post_with_payload(fallback_payload)
         data = resp.json()
         effective_seed = None
-    else:
-        data = resp.json()
-        effective_seed = seed
+
     candidates = data.get("candidates") or []
     if not candidates:
         raise ValueError(f"Unexpected Gemini response: {json.dumps(data, ensure_ascii=False)[:500]}")
@@ -1728,6 +1738,25 @@ def call_gemini_image(
         image_bytes = base64.b64decode(b64_data)
         image_url = f"data:{inline_data.get('mimeType', inline_data.get('mime_type', 'image/png'))};base64,{b64_data}"
         return image_url, image_bytes, effective_seed
+
+    finish_reason = candidates[0].get("finishReason", "")
+    if finish_reason == "MALFORMED_FUNCTION_CALL" and payload != text_only_payload:
+        retry_resp = _post_with_payload(text_only_payload)
+        retry_data = retry_resp.json()
+        retry_candidates = retry_data.get("candidates") or []
+        retry_parts = ((retry_candidates[0].get("content") or {}).get("parts")) or [] if retry_candidates else []
+        for part in retry_parts:
+            inline_data = part.get("inlineData") or part.get("inline_data")
+            if not inline_data:
+                continue
+            b64_data = inline_data.get("data", "")
+            if not b64_data:
+                continue
+            image_bytes = base64.b64decode(b64_data)
+            image_url = f"data:{inline_data.get('mimeType', inline_data.get('mime_type', 'image/png'))};base64,{b64_data}"
+            return image_url, image_bytes, None
+        raise ValueError(f"Gemini malformed function call after fallback: {json.dumps(retry_data, ensure_ascii=False)[:500]}")
+
     raise ValueError(f"Gemini response contained no image parts: {json.dumps(data, ensure_ascii=False)[:500]}")
 
 
