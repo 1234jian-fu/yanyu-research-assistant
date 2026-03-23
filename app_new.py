@@ -620,9 +620,17 @@ VIZ_DEFAULT_STATE = {
     "description": "",
     "label_mode": "无文字版",
     "label_language": "中文",
+    "label_content_mode": "自动生成后编辑（推荐）",
+    "label_terms_text": "",
+    "auto_generated_labels": [],
+    "final_label_terms": [],
+    "final_language_rule": "禁止任何文字标签",
     "info_density": "中",
     "aspect_ratio": "1:1",
     "logic_summary": "",
+    "skill_prompt": "",
+    "optimized_prompt": "",
+    "hard_constraints": "",
     "base_prompt": "",
     "prompt_with_labels": "",
     "prompt_without_labels": "",
@@ -1328,6 +1336,173 @@ def get_viz_components(viz_state: dict) -> List[str]:
     return merged
 
 
+def build_viz_label_terms(viz_state: dict) -> List[str]:
+    label_mode = viz_state.get("label_mode", "无文字版")
+    if label_mode != "有文字版":
+        return []
+
+    manual_terms = [line.strip() for line in re.split(r"[\n,，;；]+", viz_state.get("label_terms_text", "")) if line.strip()]
+    auto_terms = [str(term).strip() for term in viz_state.get("auto_generated_labels", []) if str(term).strip()]
+    content_mode = viz_state.get("label_content_mode", "自动生成后编辑（推荐）")
+
+    if content_mode == "手动填写":
+        return manual_terms
+    if content_mode == "仅自动生成":
+        return auto_terms
+
+    merged: List[str] = []
+    for term in manual_terms + auto_terms:
+        if term and term not in merged:
+            merged.append(term)
+    return merged
+
+
+def infer_viz_final_language_rule(viz_state: dict) -> str:
+    label_mode = viz_state.get("label_mode", "无文字版")
+    if label_mode != "有文字版":
+        return "禁止任何文字标签"
+    return "仅允许中文标签" if viz_state.get("label_language", "中文") == "中文" else "仅允许英文标签"
+
+
+def suggest_viz_label_terms(viz_state: dict) -> List[str]:
+    label_mode = viz_state.get("label_mode", "无文字版")
+    if label_mode != "有文字版":
+        return []
+
+    material_text = viz_state.get("material_name", "").strip()
+    components = get_viz_components(viz_state)
+    scene = viz_state.get("scene", "").strip()
+    usage = viz_state.get("usage", "").strip()
+    emphasis_parts = [part.strip() for part in re.split(r"[\n,，;；]+", viz_state.get("emphasis_points_text", "")) if part.strip()]
+    description = viz_state.get("description", "").strip()
+    structure_notes = viz_state.get("structure_notes", "").strip()
+    language = viz_state.get("label_language", "中文")
+
+    candidates: List[str] = []
+    if language == "中文":
+        if material_text:
+            candidates.append(material_text)
+        candidates.extend(components[:2])
+        candidates.extend(emphasis_parts[:3])
+        for text in [scene, usage, structure_notes]:
+            if text:
+                candidates.append(text)
+        if "离子" in description and "迁移路径" not in candidates:
+            candidates.append("离子迁移路径")
+        if ("界面" in description or "异质结" in description) and "界面反应区" not in candidates:
+            candidates.append("界面反应区")
+        if ("结构" in description or "层" in description) and "结构示意" not in candidates:
+            candidates.append("结构示意")
+    else:
+        if material_text:
+            candidates.append(material_text)
+        candidates.extend(components[:2])
+        candidates.extend(emphasis_parts[:3])
+        scene_map = {
+            "机理示意图": "Mechanism",
+            "结构表征图": "Structure",
+            "实验流程图": "Workflow",
+            "对比结果图": "Comparison",
+            "逻辑框架图": "Framework",
+        }
+        usage_map = {
+            "论文主图": "Main Figure",
+            "论文 TOC 图": "Graphical Abstract",
+            "汇报展示": "Presentation Figure",
+            "基金申请": "Proposal Figure",
+            "教学示意": "Teaching Diagram",
+            "社媒科普": "Science Visual",
+        }
+        for mapped in [scene_map.get(scene, scene), usage_map.get(usage, usage)]:
+            if mapped:
+                candidates.append(mapped)
+        if "ion" in description.lower() or "离子" in description:
+            candidates.append("Ion transport")
+        if "interface" in description.lower() or "界面" in description:
+            candidates.append("Interface region")
+        if "structure" in description.lower() or "结构" in description:
+            candidates.append("Structure")
+
+    deduped: List[str] = []
+    for term in candidates:
+        clean = str(term).strip()
+        if not clean or clean in deduped:
+            continue
+        deduped.append(clean)
+        if len(deduped) >= 6:
+            break
+    return deduped
+
+
+def build_viz_skill_prompt(viz_state: dict) -> str:
+    material_text = viz_state.get("material_name", "").strip() or "unspecified material system"
+    components = get_viz_components(viz_state)
+    components_text = ", ".join(components) if components else "key material components"
+    scene_text = VIZ_SCENE_PROMPTS.get(viz_state.get("scene", ""), viz_state.get("scene", "scientific illustration"))
+    usage_text = viz_state.get("usage", "论文主图")
+    emphasis_text = viz_state.get("emphasis_points_text", "").strip() or "highlight the core scientific message"
+    structure_notes = viz_state.get("structure_notes", "").strip() or "maintain accurate structural relationships"
+    description_text = viz_state.get("description", "").strip() or "show the target scientific content clearly"
+    skill_hint = LOCAL_SKILLS.get("README", {}).get("description", "")
+    skill_prefix = ""
+    if skill_hint:
+        skill_prefix = f"Skill guidance: {skill_hint[:120].strip()}. "
+    return (
+        f"{skill_prefix}Create a scientific figure for Gemini image generation. "
+        f"Material system: {material_text}. "
+        f"Key components: {components_text}. "
+        f"Scene task: {scene_text}. "
+        f"Usage context: {usage_text}. "
+        f"Emphasis points: {emphasis_text}. "
+        f"Structural notes: {structure_notes}. "
+        f"Scientific description: {description_text}."
+    )
+
+
+def build_viz_optimized_prompt(viz_state: dict, skill_prompt: str) -> str:
+    style_text = VIZ_STYLE_PROMPTS.get(viz_state.get("style", ""), viz_state.get("style", "academic illustration"))
+    info_density_map = {"低": "low", "中": "medium", "高": "high"}
+    info_density = info_density_map.get(viz_state.get("info_density", "中"), "medium")
+    aspect_ratio = viz_state.get("aspect_ratio", "1:1")
+    return (
+        f"Preserve the original scientific meaning of this prompt and optimize it for Gemini image generation: {skill_prompt} "
+        f"Enhance the visual clarity, composition hierarchy, and publication-grade storytelling without changing the material system or scientific relationships. "
+        f"Visual style target: {style_text}. Information density: {info_density}. Aspect ratio: {aspect_ratio}. "
+        "Favor clean academic composition, clear focal regions, balanced spacing, crisp arrows/callouts when needed, and accurate scientific structure depiction."
+    )
+
+
+def build_viz_hard_constraints(viz_state: dict, label_terms: List[str]) -> str:
+    label_mode = viz_state.get("label_mode", "无文字版")
+    label_language = viz_state.get("label_language", "中文")
+    aspect_ratio = viz_state.get("aspect_ratio", "1:1")
+    ratio_constraint = f"Strict layout constraint: keep the composition suitable for a {aspect_ratio} figure ratio."
+
+    if label_mode != "有文字版":
+        return (
+            f"{ratio_constraint} Strict text constraint: the image must contain no visible text, no labels, no legends, no annotations, "
+            "no title, no Chinese characters, no English words, and no caption-like markings."
+        )
+
+    joined_terms = "; ".join(label_terms)
+    if label_language == "中文":
+        label_constraint = (
+            "Strict language constraint: all visible labels and annotations must be in Simplified Chinese only. "
+            "Do not use any English words, Latin labels, or mixed-language text."
+        )
+    else:
+        label_constraint = (
+            "Strict language constraint: all visible labels and annotations must be in English only. "
+            "Do not use any Chinese characters or mixed-language text."
+        )
+
+    terms_constraint = ""
+    if joined_terms:
+        terms_constraint = f" Use the following labels where appropriate: {joined_terms}. Do not invent unrelated labels."
+
+    return f"{ratio_constraint} {label_constraint}{terms_constraint}"
+
+
 def build_viz_logic_summary(viz_state: dict) -> str:
     material_text = viz_state.get("material_name", "").strip() or "未指定材料"
     components = get_viz_components(viz_state)
@@ -1337,76 +1512,62 @@ def build_viz_logic_summary(viz_state: dict) -> str:
     style = viz_state.get("style", "未指定风格")
     label_mode = viz_state.get("label_mode", "未指定标注模式")
     label_language = viz_state.get("label_language", "未指定标签语言") if label_mode == "有文字版" else "关闭"
-    final_language_rule = "仅允许中文标签" if label_mode == "有文字版" and label_language == "中文" else (
-        "仅允许英文标签" if label_mode == "有文字版" and label_language == "英文" else "禁止任何文字标签"
-    )
+    final_language_rule = infer_viz_final_language_rule(viz_state)
+    label_content_mode = viz_state.get("label_content_mode", "关闭") if label_mode == "有文字版" else "关闭"
+    final_labels = build_viz_label_terms(viz_state)
+    labels_preview = "、".join(final_labels[:4]) if final_labels else "无"
     return (
         f"材料：{material_text}｜组成：{components_text}｜用途：{usage}｜场景：{scene}｜风格：{style}｜标注：{label_mode}"
-        f"｜标签语言：{label_language}｜最终语言约束：{final_language_rule}"
+        f"｜标签语言：{label_language}｜最终语言约束：{final_language_rule}｜标签来源：{label_content_mode}｜标签预览：{labels_preview}"
     )
 
 
 def build_viz_prompt_bundle(viz_state: dict) -> dict:
-    material_text = viz_state.get("material_name", "").strip() or "unspecified material system"
-    components = get_viz_components(viz_state)
-    components_text = ", ".join(components) if components else "key material components"
-    scene_text = VIZ_SCENE_PROMPTS.get(viz_state.get("scene", ""), viz_state.get("scene", "scientific illustration"))
-    style_text = VIZ_STYLE_PROMPTS.get(viz_state.get("style", ""), viz_state.get("style", "academic illustration"))
-    usage_text = viz_state.get("usage", "论文主图")
-    emphasis_text = viz_state.get("emphasis_points_text", "").strip() or "highlight the main scientific message clearly"
-    structure_notes = viz_state.get("structure_notes", "").strip() or "maintain accurate structural relationships"
-    description_text = viz_state.get("description", "").strip() or "show the target scientific content clearly"
-    info_density_map = {"低": "low", "中": "medium", "高": "high"}
-    info_density = info_density_map.get(viz_state.get("info_density", "中"), "medium")
-    aspect_ratio = viz_state.get("aspect_ratio", "1:1")
-    label_mode = viz_state.get("label_mode", "无文字版")
-    label_language = "Chinese" if viz_state.get("label_language") == "中文" else "English"
-
-    base_prompt = (
-        f"{style_text}. "
-        f"Material: {material_text}. "
-        f"Key components: {components_text}. "
-        f"Scene goal: {scene_text}. "
-        f"Usage context: {usage_text}. "
-        f"Emphasis points: {emphasis_text}. "
-        f"Structural notes: {structure_notes}. "
-        f"Description: {description_text}. "
-        f"Information density: {info_density}. "
-        f"Aspect ratio: {aspect_ratio}. "
-        "High resolution, academic journal quality. "
-        "Ensure strong composition hierarchy, clear scientific storytelling, clean background, accurate material relationships, "
-        "professional color usage, and visual focus on the core scientific message."
-    )
-
-    prompt_with_labels = (
-        f"{base_prompt} "
-        f"Use {label_language} labels only. "
-        f"All visible labels, annotations, legends, arrows, and callouts must be written in {label_language}. "
-        "Labels must be concise, publication-style, clean, minimal, and embedded naturally into the figure. "
-        "Do not mix multiple languages in one image."
-    )
-    prompt_without_labels = (
-        f"{base_prompt} "
-        "Do not include any text labels, titles, legends, letters, annotations, or language characters in the image."
-    )
-    final_prompt = prompt_with_labels if label_mode == "有文字版" else prompt_without_labels
-    compact_prompt = f"{style_text}; {material_text}; {components_text}; {scene_text}; {description_text}; academic journal quality"
+    skill_prompt = build_viz_skill_prompt(viz_state)
+    optimized_prompt = build_viz_optimized_prompt(viz_state, skill_prompt)
+    auto_generated_labels = suggest_viz_label_terms(viz_state)
+    label_terms = build_viz_label_terms({**viz_state, "auto_generated_labels": auto_generated_labels})
+    final_language_rule = infer_viz_final_language_rule(viz_state)
+    hard_constraints = build_viz_hard_constraints(viz_state, label_terms)
+    prompt_with_labels = f"{skill_prompt} {optimized_prompt} {hard_constraints}".strip()
+    prompt_without_labels = f"{skill_prompt} {optimized_prompt} {build_viz_hard_constraints({**viz_state, 'label_mode': '无文字版'}, [])}".strip()
+    final_prompt = prompt_with_labels if viz_state.get("label_mode", "无文字版") == "有文字版" else prompt_without_labels
+    compact_prompt = f"{viz_state.get('style', '')}; {viz_state.get('material_name', '')}; {viz_state.get('scene', '')}; {viz_state.get('description', '')}; Gemini-ready scientific figure"
     return {
-        "base_prompt": base_prompt,
+        "skill_prompt": skill_prompt,
+        "optimized_prompt": optimized_prompt,
+        "hard_constraints": hard_constraints,
+        "auto_generated_labels": auto_generated_labels,
+        "final_label_terms": label_terms,
+        "final_language_rule": final_language_rule,
+        "base_prompt": skill_prompt,
         "prompt_with_labels": prompt_with_labels,
         "prompt_without_labels": prompt_without_labels,
         "compact_prompt": compact_prompt,
-        "expanded_prompt": final_prompt,
+        "expanded_prompt": optimized_prompt,
         "final_prompt": final_prompt,
     }
 
 
 def build_viz_iteration_prompt(viz_state: dict) -> str:
     instruction = viz_state.get("iteration_instruction", "").strip()
+    local_area = viz_state.get("local_area_hint", "").strip() or "the user-specified local area"
+    optimized_prompt = viz_state.get("optimized_prompt", "").strip() or viz_state.get("expanded_prompt", "").strip()
+    hard_constraints = viz_state.get("hard_constraints", "").strip()
+    label_terms = viz_state.get("final_label_terms") or build_viz_label_terms(viz_state)
+    label_terms_clause = f"Keep these label terms consistent when visible: {'; '.join(label_terms)}. " if label_terms else ""
+    composition_rule = "Maintain the original composition, spatial arrangement, materials, lighting, and camera perspective. "
+    if not viz_state.get("preserve_composition", True):
+        composition_rule = "Preserve the main scientific subject and overall readability, but allow moderate local layout adjustment. "
     return (
-        "Based on the previous image, KEEP 90% of the composition. "
-        f"ONLY change the following part: {instruction}. "
-        "Keep the materials, lighting and camera angle identical."
+        "Use the provided reference image as the primary visual basis. "
+        "First understand the current figure, including composition, object placement, label distribution, and scientific relationships. "
+        f"{optimized_prompt} {hard_constraints} "
+        f"{composition_rule}"
+        f"Only modify this path or local area: {local_area}. "
+        f"Requested local change: {instruction}. "
+        f"{label_terms_clause}"
+        "Keep all other scientific relationships, textures, labels outside the target area, and non-target regions unchanged."
     ).strip()
 
 
@@ -1596,10 +1757,18 @@ def append_viz_history_entry(viz_state: dict, prompt_used: str, iteration_instru
         "description": viz_state.get("description", ""),
         "label_mode": viz_state.get("label_mode", ""),
         "label_language": viz_state.get("label_language", ""),
+        "label_content_mode": viz_state.get("label_content_mode", ""),
+        "label_terms_text": viz_state.get("label_terms_text", ""),
+        "auto_generated_labels": list(viz_state.get("auto_generated_labels", [])),
+        "final_label_terms": list(viz_state.get("final_label_terms", [])),
+        "final_language_rule": viz_state.get("final_language_rule", ""),
         "info_density": viz_state.get("info_density", ""),
         "aspect_ratio": viz_state.get("aspect_ratio", "1:1"),
         "logic_summary": viz_state.get("logic_summary", ""),
         "base_prompt": viz_state.get("base_prompt", ""),
+        "skill_prompt": viz_state.get("skill_prompt", ""),
+        "optimized_prompt": viz_state.get("optimized_prompt", ""),
+        "hard_constraints": viz_state.get("hard_constraints", ""),
         "prompt_with_labels": viz_state.get("prompt_with_labels", ""),
         "prompt_without_labels": viz_state.get("prompt_without_labels", ""),
         "compact_prompt": viz_state.get("compact_prompt", ""),
@@ -1631,13 +1800,15 @@ def restore_viz_history_entry(viz_state: dict, entry_id: str) -> None:
             continue
         for key in [
             "material_name", "component_tags_text", "usage", "scene", "style", "emphasis_points_text", "structure_notes",
-            "description", "label_mode", "label_language", "info_density", "aspect_ratio", "logic_summary", "base_prompt",
-            "prompt_with_labels", "prompt_without_labels", "compact_prompt", "expanded_prompt", "final_prompt", "local_area_hint",
+            "description", "label_mode", "label_language", "label_content_mode", "label_terms_text", "info_density", "aspect_ratio", "logic_summary", "base_prompt",
+            "skill_prompt", "optimized_prompt", "hard_constraints", "prompt_with_labels", "prompt_without_labels", "compact_prompt", "expanded_prompt", "final_prompt", "local_area_hint",
             "inpaint_strength", "preserve_composition", "edit_mode", "iteration_mode", "seed_value", "current_seed", "current_image_seed",
-            "style_reference_image", "style_reference_name", "style_strength"
+            "style_reference_image", "style_reference_name", "style_strength", "final_language_rule"
         ]:
             viz_state[key] = entry.get(key, deepcopy(VIZ_DEFAULT_STATE.get(key)))
         viz_state["component_tags"] = list(entry.get("component_tags", []))
+        viz_state["auto_generated_labels"] = list(entry.get("auto_generated_labels", []))
+        viz_state["final_label_terms"] = list(entry.get("final_label_terms", []))
         viz_state["current_result_id"] = entry.get("id")
         viz_state["current_parent_id"] = entry.get("parent_id")
         viz_state["current_image_url"] = entry.get("image_url", "")
@@ -3098,6 +3269,32 @@ def render_viz_engine() -> None:
                     index=0 if viz_state.get("label_language", "中文") == "中文" else 1,
                     key="viz_label_language",
                 )
+            if viz_state.get("label_mode") == "有文字版":
+                content_modes = ["自动生成后编辑（推荐）", "手动填写", "仅自动生成"]
+                viz_state["label_content_mode"] = st.selectbox(
+                    "标签内容来源",
+                    content_modes,
+                    index=content_modes.index(viz_state.get("label_content_mode", "自动生成后编辑（推荐）")) if viz_state.get("label_content_mode", "自动生成后编辑（推荐）") in content_modes else 0,
+                    key="viz_label_content_mode",
+                )
+                suggested_terms = suggest_viz_label_terms(viz_state)
+                viz_state["auto_generated_labels"] = suggested_terms
+                if viz_state.get("label_content_mode") != "手动填写" and not viz_state.get("label_terms_text", "").strip():
+                    viz_state["label_terms_text"] = "\n".join(suggested_terms)
+                label_help = "每行一个标签；系统会按中文/英文模式约束 Gemini 使用这些标识。"
+                label_title = "中文标识内容" if viz_state.get("label_language") == "中文" else "英文标识内容"
+                viz_state["label_terms_text"] = st.text_area(
+                    label_title,
+                    value=viz_state.get("label_terms_text", ""),
+                    height=110,
+                    placeholder="例如：离子迁移路径\n界面反应区\n结构示意",
+                    help=label_help,
+                    key="viz_label_terms_text",
+                )
+                if suggested_terms:
+                    st.caption(f"自动建议：{' ｜ '.join(suggested_terms)}")
+            else:
+                viz_state["final_label_terms"] = []
             col3, col4 = st.columns(2)
             with col3:
                 density_options = ["低", "中", "高"]
@@ -3134,15 +3331,15 @@ def render_viz_engine() -> None:
         viz_state.update(prompt_bundle)
 
         st.markdown("### Prompt 控制台")
-        tab1, tab2, tab3, tab4 = st.tabs(["最终 Prompt", "无文字版", "有文字版", "基础版"])
+        tab1, tab2, tab3, tab4 = st.tabs(["最终 Gemini Prompt", "Skills 基础稿", "优化增强稿", "硬约束"])
         with tab1:
             st.code(viz_state["final_prompt"], language="text")
         with tab2:
-            st.code(viz_state["prompt_without_labels"], language="text")
+            st.code(viz_state.get("skill_prompt", ""), language="text")
         with tab3:
-            st.code(viz_state["prompt_with_labels"], language="text")
+            st.code(viz_state.get("optimized_prompt", ""), language="text")
         with tab4:
-            st.code(viz_state["base_prompt"], language="text")
+            st.code(viz_state.get("hard_constraints", ""), language="text")
 
         action_col1, action_col2, action_col3 = st.columns([1, 1, 2])
         with action_col1:
@@ -3209,13 +3406,43 @@ def render_viz_engine() -> None:
             render_viz_image_slot("", empty_text="尚未生成图片。填写左侧参数和描述后，点击“生成图片”。", container_height=380, image_max_height=350)
 
         st.markdown("### 继续修改当前结果")
+        st.caption("工作流：先把当前图反馈给 Gemini 进行图像理解，再由 Claude 按你填写的修改路径与要求生成针对 Gemini 的局部修改提示词，最后执行局部生图。")
         viz_state["iteration_instruction"] = st.text_input(
             "修改框",
             value=viz_state.get("iteration_instruction", ""),
             placeholder="例如：把 Li+ 改为红色 / 把右上角放大框增强一点",
             key="viz_iteration_instruction",
         )
-        st.caption(f"锁定构图：已启用 | 参考原图局部重绘 | 当前 Seed：{viz_state.get('current_seed') if viz_state.get('current_seed') is not None else '自动'}")
+        tweak_col1, tweak_col2 = st.columns(2)
+        with tweak_col1:
+            viz_state["local_area_hint"] = st.text_input(
+                "修改路径 / 局部区域",
+                value=viz_state.get("local_area_hint", ""),
+                placeholder="例如：右上角放大框 > 箭头路径 / 中央主体颗粒 / 左侧标签区",
+                key="viz_local_area_hint",
+            )
+        with tweak_col2:
+            viz_state["inpaint_strength"] = st.slider(
+                "局部修改强度",
+                min_value=0.2,
+                max_value=0.5,
+                value=float(viz_state.get("inpaint_strength", 0.35)),
+                step=0.05,
+                key="viz_inpaint_strength",
+            )
+        viz_state["preserve_composition"] = st.checkbox(
+            "保持原始构图",
+            value=viz_state.get("preserve_composition", True),
+            key="viz_preserve_composition",
+        )
+        iteration_preview_prompt = build_viz_iteration_prompt(viz_state) if viz_state.get("iteration_instruction", "").strip() else ""
+        viz_state["iteration_preview_prompt"] = iteration_preview_prompt
+        st.caption(f"当前局部修改链路：参考原图理解 → Claude 生成 Gemini 专用局部修改 Prompt → Gemini 执行局部重绘 | Seed：{viz_state.get('current_seed') if viz_state.get('current_seed') is not None else '自动'}")
+        with st.expander("局部修改 Prompt 预览", expanded=False):
+            if iteration_preview_prompt:
+                st.code(iteration_preview_prompt, language="text")
+            else:
+                st.info("填写修改框后，这里会显示最终发给 Gemini 的局部修改 Prompt。")
         apply_edit_clicked = st.button("应用修改", use_container_width=True, key="viz_apply_edit")
         if apply_edit_clicked:
             if not viz_state.get("current_image_url"):
