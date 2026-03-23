@@ -1156,6 +1156,21 @@ def render_ppt_slide_preview(spec: dict) -> str:
     """.strip()
 
 
+def sanitize_for_json(value):
+    if isinstance(value, bytes):
+        return {
+            "type": "bytes",
+            "size": len(value),
+        }
+    if isinstance(value, dict):
+        return {key: sanitize_for_json(val) for key, val in value.items()}
+    if isinstance(value, list):
+        return [sanitize_for_json(item) for item in value]
+    if isinstance(value, tuple):
+        return [sanitize_for_json(item) for item in value]
+    return value
+
+
 def append_ppt_history_entry(ppt_state: dict) -> None:
     spec = deepcopy(ppt_state.get("current_slide_struct") or {})
     if not spec:
@@ -1472,6 +1487,23 @@ def build_viz_optimized_prompt(viz_state: dict, skill_prompt: str) -> str:
     )
 
 
+def normalize_viz_label_terms(label_terms: List[str], label_language: str) -> List[str]:
+    normalized: List[str] = []
+    for term in label_terms:
+        clean = str(term).strip()
+        if not clean:
+            continue
+        if label_language == "中文":
+            if not re.search(r"[\u4e00-\u9fff]", clean):
+                continue
+        else:
+            if re.search(r"[\u4e00-\u9fff]", clean):
+                continue
+        if clean not in normalized:
+            normalized.append(clean)
+    return normalized
+
+
 def build_viz_hard_constraints(viz_state: dict, label_terms: List[str]) -> str:
     label_mode = viz_state.get("label_mode", "无文字版")
     label_language = viz_state.get("label_language", "中文")
@@ -1480,25 +1512,28 @@ def build_viz_hard_constraints(viz_state: dict, label_terms: List[str]) -> str:
 
     if label_mode != "有文字版":
         return (
-            f"{ratio_constraint} Strict text constraint: the image must contain no visible text, no labels, no legends, no annotations, "
-            "no title, no Chinese characters, no English words, and no caption-like markings."
+            f"{ratio_constraint} "
+            "Absolute text prohibition: the image must contain zero visible text elements. "
+            "Do not render any labels, legends, annotations, callouts, axis text, titles, numbers, Chinese characters, English words, abbreviations, or caption-like markings anywhere in the figure. "
+            "Communicate only through shapes, arrows, icons, regions, and purely visual scientific elements."
         )
 
-    joined_terms = "; ".join(label_terms)
+    normalized_terms = normalize_viz_label_terms(label_terms, label_language)
+    joined_terms = "; ".join(normalized_terms)
     if label_language == "中文":
         label_constraint = (
-            "Strict language constraint: all visible labels and annotations must be in Simplified Chinese only. "
-            "Do not use any English words, Latin labels, or mixed-language text."
+            "Absolute language constraint: every visible label, annotation, legend, and callout must be written in Simplified Chinese only. "
+            "Do not use any English words, Latin letters, pinyin, or mixed-language text anywhere in visible annotations."
         )
     else:
         label_constraint = (
-            "Strict language constraint: all visible labels and annotations must be in English only. "
-            "Do not use any Chinese characters or mixed-language text."
+            "Absolute language constraint: every visible label, annotation, legend, and callout must be written in English only. "
+            "Do not use any Chinese characters or mixed-language text anywhere in visible annotations."
         )
 
     terms_constraint = ""
     if joined_terms:
-        terms_constraint = f" Use the following labels where appropriate: {joined_terms}. Do not invent unrelated labels."
+        terms_constraint = f" Visible labels should preferentially use only these approved terms: {joined_terms}. Do not invent unrelated labels."
 
     return f"{ratio_constraint} {label_constraint}{terms_constraint}"
 
@@ -1525,8 +1560,8 @@ def build_viz_logic_summary(viz_state: dict) -> str:
 def build_viz_prompt_bundle(viz_state: dict) -> dict:
     skill_prompt = build_viz_skill_prompt(viz_state)
     optimized_prompt = build_viz_optimized_prompt(viz_state, skill_prompt)
-    auto_generated_labels = suggest_viz_label_terms(viz_state)
-    label_terms = build_viz_label_terms({**viz_state, "auto_generated_labels": auto_generated_labels})
+    auto_generated_labels = normalize_viz_label_terms(suggest_viz_label_terms(viz_state), viz_state.get("label_language", "中文"))
+    label_terms = normalize_viz_label_terms(build_viz_label_terms({**viz_state, "auto_generated_labels": auto_generated_labels}), viz_state.get("label_language", "中文"))
     final_language_rule = infer_viz_final_language_rule(viz_state)
     hard_constraints = build_viz_hard_constraints(viz_state, label_terms)
     prompt_with_labels = f"{skill_prompt} {optimized_prompt} {hard_constraints}".strip()
@@ -3148,7 +3183,7 @@ def render_ppt_history_panel(ppt_state: dict) -> None:
             with c2:
                 st.download_button(
                     "⬇️ 下载 JSON",
-                    data=json.dumps(entry.get("current_slide_struct") or {}, ensure_ascii=False, indent=2).encode("utf-8"),
+                    data=json.dumps(sanitize_for_json(entry.get("current_slide_struct") or {}), ensure_ascii=False, indent=2).encode("utf-8"),
                     file_name=f"xueyan_ppt_{entry['id']}.json",
                     mime="application/json",
                     key=f"ppt_hist_dl_{entry['id']}",
@@ -3674,7 +3709,7 @@ def render_ppt_engine() -> None:
             if download_slide_ready:
                 st.download_button(
                     "下载当前页",
-                    data=json.dumps(ppt_state.get("current_slide_struct") or {}, ensure_ascii=False, indent=2).encode("utf-8"),
+                    data=json.dumps(sanitize_for_json(ppt_state.get("current_slide_struct") or {}), ensure_ascii=False, indent=2).encode("utf-8"),
                     file_name=build_export_filename("xueyan_ppt_slide", ppt_state.get("page_title") or "current-slide", suffix=".json"),
                     mime="application/json",
                     use_container_width=True,
@@ -3722,7 +3757,31 @@ def render_ppt_engine() -> None:
     with panel3:
         st.markdown("### Panel 3 · 输出与 PPT 组装")
         assembly_pages = ppt_state.get("assembly_pages", [])
+        export_ready = bool(assembly_pages)
+        export_col, status_col = st.columns([1.2, 1])
+        with export_col:
+            if PPTX_AVAILABLE and export_ready:
+                deck_bytes = export_pptx_deck(ppt_state)
+                st.download_button(
+                    "导出 PPTX",
+                    data=deck_bytes,
+                    file_name=build_export_filename("xueyan_ppt_deck", ppt_state.get("page_title") or "research-deck", suffix=".pptx"),
+                    mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                    use_container_width=True,
+                    key="ppt_export_deck_top",
+                )
+            elif PPTX_AVAILABLE:
+                st.button("导出 PPTX", disabled=True, use_container_width=True, key="ppt_export_deck_disabled")
+            else:
+                st.button("导出 PPTX", disabled=True, use_container_width=True, key="ppt_export_deck_missing_dep")
+        with status_col:
+            if export_ready:
+                st.success("已具备导出条件")
+            else:
+                st.caption("至少先加入 1 页后才能导出")
         st.metric("已加入页数", len(assembly_pages))
+        if not PPTX_AVAILABLE:
+            st.warning("当前环境缺少 python-pptx，暂时不能导出 PPTX。先安装 requirements.txt 依赖后即可使用。")
         if ppt_state.get("current_slide_id"):
             st.caption(f"当前页编号：{ppt_state['current_slide_id']}")
         if not assembly_pages:
@@ -3754,19 +3813,16 @@ def render_ppt_engine() -> None:
                         remove_assembly_slide(ppt_state, slide["id"])
                         st.rerun()
 
-        if assembly_pages:
-            if PPTX_AVAILABLE:
-                deck_bytes = export_pptx_deck(ppt_state)
-                st.download_button(
-                    "导出 PPTX",
-                    data=deck_bytes,
-                    file_name=build_export_filename("xueyan_ppt_deck", ppt_state.get("page_title") or "research-deck", suffix=".pptx"),
-                    mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                    use_container_width=True,
-                    key="ppt_export_deck",
-                )
-            else:
-                st.warning("当前环境缺少 python-pptx，暂时不能导出 PPTX。先安装 requirements.txt 依赖后即可使用。")
+        if assembly_pages and PPTX_AVAILABLE:
+            deck_bytes = export_pptx_deck(ppt_state)
+            st.download_button(
+                "导出 PPTX（底部）",
+                data=deck_bytes,
+                file_name=build_export_filename("xueyan_ppt_deck", ppt_state.get("page_title") or "research-deck", suffix=".pptx"),
+                mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                use_container_width=True,
+                key="ppt_export_deck_bottom",
+            )
 
 
 def render_formatting_engine() -> None:
