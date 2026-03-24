@@ -2886,6 +2886,25 @@ def render_copy_text(text: str, key: str, button_label: str = "📋 一键复制
     )
 
 
+def extract_primary_output(text: str, function: str) -> str:
+    cleaned = text.strip()
+    if function not in {"🤖 去AI味 (Humanizer)", "📋 Redlining修订"}:
+        return cleaned
+
+    patterns = [
+        r"(?:^|\n)#+\s*修改后文本\s*[:：]?\s*\n([\s\S]*?)(?=\n#+\s*修改说明\s*[:：]?|\n修改说明\s*[:：]?|\Z)",
+        r"(?:^|\n)\*\*修改后文本\*\*\s*[:：]?\s*\n([\s\S]*?)(?=\n\*\*修改说明\*\*\s*[:：]?|\n修改说明\s*[:：]?|\Z)",
+        r"(?:^|\n)修改后文本\s*[:：]\s*\n?([\s\S]*?)(?=\n修改说明\s*[:：]?|\Z)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, cleaned, flags=re.MULTILINE)
+        if match:
+            candidate = match.group(1).strip()
+            if candidate:
+                return candidate
+    return cleaned
+
+
 def inject_custom_css() -> None:
     st.markdown(
         UI_CONFIG["primary_button_css"],
@@ -2926,9 +2945,10 @@ def render_header() -> None:
 def render_result_actions(section_name: str, current_input: str, previous_output: str, function: str, domain: str) -> None:
     st.markdown("<div class='result-toolbar'><strong>快捷操作</strong></div>", unsafe_allow_html=True)
     copy_button_id = f"copy_result_btn_{section_name}_{function}".replace(" ", "_")
+    copy_text = extract_primary_output(previous_output, function)
     col1, col2 = st.columns([1, 1])
     with col1:
-        render_copy_text(previous_output, copy_button_id, button_label="📋 一键复制结果")
+        render_copy_text(copy_text, copy_button_id, button_label="📋 一键复制结果")
         st.download_button(
             "📄 下载结果.txt",
             previous_output.encode("utf-8"),
