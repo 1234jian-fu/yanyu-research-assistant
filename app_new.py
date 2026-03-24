@@ -56,10 +56,19 @@ st.set_page_config(
 CLAUDE_API_KEY = os.getenv("ANTHROPIC_AUTH_TOKEN", "").strip()
 CLAUDE_BASE_URL = os.getenv("ANTHROPIC_BASE_URL", "https://aiapi.aixia.tech").rstrip("/")
 CLAUDE_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-opus-4-6")
+CLAUDE_MODEL_OPTIONS = [
+    "claude-opus-4-6",
+    "claude-sonnet-4-6",
+]
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 GEMINI_BASE_URL = os.getenv("GEMINI_BASE_URL", "https://new.lemonapi.site").rstrip("/")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-image-preview")
+GEMINI_MODEL_OPTIONS = [
+    "gemini-3.1-flash-image-preview",
+    "gemini-2.5-flash-image-preview",
+    "gemini-2.0-flash-preview-image-generation",
+]
 
 WRITING_PAGE = "✍️ 论文写作"
 FORMATTING_PAGE = "📐 格式对齐"
@@ -68,12 +77,66 @@ PPT_PAGE = "🗂️ PPT大师"
 
 CONFIG = {
     "sections": {
-        "摘要": {"focus": "开门见山，数据支撑", "max_words": 250},
-        "引言": {"focus": "背景转折，研究空白", "max_words": 800},
-        "方法": {"focus": "流程清晰，参数精确", "max_words": 1500},
-        "结果": {"focus": "数据客观，图表引用", "max_words": 1200},
-        "讨论": {"focus": "深度解读，文献对比", "max_words": 1000},
-        "结论": {"focus": "总结贡献，展望未来", "max_words": 300},
+        "摘要": {
+            "focus": "开门见山，数据支撑",
+            "max_words": 250,
+            "goal": "用最短篇幅交代研究对象、方法、核心结果与贡献。",
+            "must_include": ["研究对象/问题", "采用的方法或策略", "关键结果或数据趋势", "结论或贡献"],
+            "avoid": ["空泛背景铺垫", "无数据支撑的形容词", "展开过多机理讨论", "引入与本文无关信息"],
+            "output_shape": "优先压缩成一段完整摘要，必要时使用4句结构。",
+            "input_hint": "请输入研究对象、方法、最关键结果和最终结论，适合直接压缩成摘要。",
+            "output_checkpoints": ["是否同时包含对象、方法、结果、贡献？", "是否有定量结果或明确趋势？", "是否避免过长背景铺垫？"],
+        },
+        "引言": {
+            "focus": "背景转折，研究空白",
+            "max_words": 800,
+            "goal": "建立研究背景、指出现有不足，并自然引出本文问题与贡献。",
+            "must_include": ["研究背景", "现有工作不足", "研究空白或痛点", "本文切入点/贡献"],
+            "avoid": ["提前展开结果细节", "把方法写成操作手册", "空洞口号式创新描述", "缺少问题转折"],
+            "output_shape": "建议按背景→不足→问题→本文贡献的顺序组织段落。",
+            "input_hint": "请输入研究背景、现有不足、文献空白和你本文的切入点。",
+            "output_checkpoints": ["是否清楚指出研究空白？", "是否自然引出本文工作？", "是否避免提前泄露结果？"],
+        },
+        "方法": {
+            "focus": "流程清晰，参数精确",
+            "max_words": 1500,
+            "goal": "把实验/计算/系统方法写得可复现、可核对、步骤清楚。",
+            "must_include": ["材料或数据来源", "关键步骤/流程", "核心参数与条件", "评价指标或表征方法"],
+            "avoid": ["宣传式语言", "结果导向表述", "省略关键参数", "步骤顺序混乱"],
+            "output_shape": "优先使用流程化段落，必要时分成材料、步骤、表征/评价三个层次。",
+            "input_hint": "请输入材料来源、实验步骤、关键参数、仪器条件和评价方法。",
+            "output_checkpoints": ["参数是否完整？", "步骤顺序是否清晰？", "是否具备可复现性？"],
+        },
+        "结果": {
+            "focus": "数据客观，图表引用",
+            "max_words": 1200,
+            "goal": "客观描述数据、趋势、对比与异常点，并和图表编号对应。",
+            "must_include": ["关键数据或现象", "趋势与对比", "图表编号或结果载体", "异常点/变化点"],
+            "avoid": ["无依据拔高结论", "只说好不说对比", "脱离图表编号", "把讨论写进结果"],
+            "output_shape": "按图表或实验顺序组织，每段尽量包含结果事实+趋势判断。",
+            "input_hint": "请输入图表编号、关键数据、主要趋势、对比对象和异常现象。",
+            "output_checkpoints": ["是否引用了图表或数据来源？", "是否体现趋势和对比？", "是否避免提前做机理解释？"],
+        },
+        "讨论": {
+            "focus": "深度解读，文献对比",
+            "max_words": 1000,
+            "goal": "解释结果背后的原因、机制与边界条件，并联系文献展开讨论。",
+            "must_include": ["结果解释", "可能机制或原因", "与文献对照", "局限性或边界条件"],
+            "avoid": ["机械重复结果描述", "缺少解释链条", "完全脱离文献", "无边界条件意识"],
+            "output_shape": "优先写成解释型段落，突出因果链、机制链和文献对照。",
+            "input_hint": "请输入你对结果的解释、可能机制、参考文献对照和局限性判断。",
+            "output_checkpoints": ["是否解释了为什么？", "是否和文献形成对照？", "是否避免只是重复结果？"],
+        },
+        "结论": {
+            "focus": "总结贡献，展望未来",
+            "max_words": 300,
+            "goal": "简洁总结工作贡献、主要发现与后续展望，不引入新细节。",
+            "must_include": ["核心发现", "本文贡献", "意义或应用价值", "合理展望"],
+            "avoid": ["引入新实验细节", "重复整段引言", "展开大段讨论", "夸张式总结"],
+            "output_shape": "优先写成1-2段收束性文本，最后一句可给出展望。",
+            "input_hint": "请输入你最想保留的核心发现、贡献总结和后续展望。",
+            "output_checkpoints": ["是否只总结已出现内容？", "是否避免新事实？", "是否收束得足够简洁？"],
+        },
     },
     "functions": {
         "📝 中转英翻译": {
@@ -809,7 +872,31 @@ def init_writing_state() -> None:
         st.session_state.setdefault(writing_term_count_key(section), 0)
 
 
+def init_runtime_model_state() -> None:
+    text_options = list(CLAUDE_MODEL_OPTIONS)
+    image_options = list(GEMINI_MODEL_OPTIONS)
+    if CLAUDE_MODEL not in text_options:
+        text_options.insert(0, CLAUDE_MODEL)
+    if GEMINI_MODEL not in image_options:
+        image_options.insert(0, GEMINI_MODEL)
+    st.session_state.setdefault("runtime_text_model_options", text_options)
+    st.session_state.setdefault("runtime_image_model_options", image_options)
+    st.session_state.setdefault("runtime_text_model", CLAUDE_MODEL)
+    st.session_state.setdefault("runtime_image_model", GEMINI_MODEL)
+
+
+def get_active_text_model() -> str:
+    init_runtime_model_state()
+    return st.session_state.get("runtime_text_model", CLAUDE_MODEL)
+
+
+def get_active_image_model() -> str:
+    init_runtime_model_state()
+    return st.session_state.get("runtime_image_model", GEMINI_MODEL)
+
+
 def init_viz_state() -> dict:
+    init_runtime_model_state()
     current = st.session_state.get("viz_lab")
     if not isinstance(current, dict):
         current = deepcopy(VIZ_DEFAULT_STATE)
@@ -820,6 +907,7 @@ def init_viz_state() -> dict:
 
 
 def init_ppt_state() -> dict:
+    init_runtime_model_state()
     current = st.session_state.get("ppt_lab")
     if not isinstance(current, dict):
         current = deepcopy(PPT_DEFAULT_STATE)
@@ -1661,6 +1749,7 @@ def call_gemini_image(
     style_reference_image: dict | None = None,
     style_strength: float | None = None,
 ) -> tuple[str, bytes | None, int | None]:
+    active_image_model = get_active_image_model()
     safe_prompt = normalize_gemini_prompt(prompt)
     parts = [{"text": safe_prompt}]
     if reference_image_bytes:
@@ -1705,7 +1794,7 @@ def call_gemini_image(
 
     def _post_with_payload(active_payload: dict) -> requests.Response:
         resp = requests.post(
-            f"{GEMINI_BASE_URL}/v1beta/models/{GEMINI_MODEL}:generateContent",
+            f"{GEMINI_BASE_URL}/v1beta/models/{active_image_model}:generateContent",
             json=active_payload,
             headers=headers,
             timeout=90,
@@ -2069,10 +2158,45 @@ def analyze_reference_paper(file_bytes: bytes, filename: str) -> str:
         return f"分析失败: {e}"
 
 
+def build_section_protocol(section: str) -> str:
+    section_profile = SECTIONS.get(section, {})
+    must_include = "\n".join(f"- {item}" for item in section_profile.get("must_include", [])) or "- 围绕当前板块核心任务展开。"
+    avoid = "\n".join(f"- {item}" for item in section_profile.get("avoid", [])) or "- 避免越界到其他板块。"
+    return f"""
+## 板块写作协议
+- 板块目标: {section_profile.get('goal', '保持学术表达稳定。')}
+- 板块焦点: {section_profile.get('focus', '学术表达')}
+- 推荐篇幅上限: {section_profile.get('max_words', '未设定')} 词
+- 推荐输出形态: {section_profile.get('output_shape', '保持正式段落输出')}
+
+### 本板块必须覆盖
+{must_include}
+
+### 本板块需要避免
+{avoid}
+"""
+
+
+def build_function_section_guidance(function: str, section: str) -> str:
+    guidance_map = {
+        ("✨ 表达润色", "摘要"): "强化摘要压缩能力，优先保留研究对象、方法、结果和贡献四个信息点。",
+        ("✨ 表达润色", "方法"): "润色时优先保证流程顺序、参数表达和可复现性，不把方法写成结果。",
+        ("🤖 去AI味 (Humanizer)", "引言"): "去AI味时重点处理背景转场、研究空白引出和贡献落点，避免模板腔。",
+        ("👨‍⚖️ Reviewer视角", "结果"): "重点检查数据是否充分、图表引用是否明确、结论是否超出了结果支撑。",
+        ("👨‍⚖️ Reviewer视角", "方法"): "重点检查实验流程、参数完整性、评价指标和可复现性是否充分。",
+        ("✍️ 影子写作", "讨论"): "优先模仿高质量论文的解释链条和文献对照方式，增强讨论深度。",
+        ("🔍 逻辑检查", "结论"): "重点检查结论是否只总结已有发现，是否引入了新事实或夸张表述。",
+    }
+    return guidance_map.get((function, section), f"当前组合重点：在“{section}”板块下严格按“{function}”职责执行，并保持该板块应有的表达结构。")
+
+
 def create_strict_prompt(function: str, input_text: str, section: str, domain: str, reference_styles: List[str], lang: str) -> str:
     skill_groups = append_skill_preview()
     domain_profile = DOMAIN_PROFILES.get(domain, {})
+    section_profile = SECTIONS.get(section, {})
     prompt_rules = CONFIG["prompt_rules"]
+    section_protocol = build_section_protocol(section)
+    combo_guidance = build_function_section_guidance(function, section)
     lang_lock = {
         "zh": "所有输出默认保持中文；若功能为翻译，则必须输出英文。",
         "en": "All output should remain English by default; if translation mode is selected, output must be Chinese.",
@@ -2088,6 +2212,10 @@ def create_strict_prompt(function: str, input_text: str, section: str, domain: s
 - 输入语言: {"中文" if lang == "zh" else "英文" if lang == "en" else "未知"}
 - 本地规则包: humanizer={skill_groups['humanizer']}, ml-paper={skill_groups['ml-paper']}, docx={skill_groups['docx']}, thesis-formatting={skill_groups['thesis-formatting']}
 - 语言约束: {lang_lock.get(lang, '')}
+- 当前板块焦点: {section_profile.get('focus', '学术表达')}
+- 当前板块增强点: {combo_guidance}
+
+{section_protocol}
 
 {prompt_rules['humanizer']}
 """
@@ -2163,8 +2291,9 @@ def get_client():
 )
 def call_api(prompt: str, timeout: int = 300) -> str:
     client = get_client()
+    active_text_model = get_active_text_model()
     message = client.messages.create(
-        model=CLAUDE_MODEL,
+        model=active_text_model,
         max_tokens=8192,
         temperature=0.2,
         timeout=timeout,
@@ -2724,24 +2853,36 @@ def run_formatting_pipeline(docx_bytes: bytes, guideline_rules: Dict, micro_tune
     return report, output_bytes
 
 
-def render_copy_text(text: str, key: str) -> None:
+def render_copy_text(text: str, key: str, button_label: str = "📋 一键复制结果") -> None:
     payload = json.dumps(text)
+    button_id = f"copy_btn_html_{key}"
+    status_id = f"copy_status_{key}"
     components.html(
         f"""
+        <div style="margin:0 0 8px 0;">
+            <button id="{button_id}" style="width:100%; padding:0.6rem 0.9rem; border:none; border-radius:10px; background:#2f6bff; color:white; font-weight:600; cursor:pointer;">
+                {button_label}
+            </button>
+            <div id="{status_id}" style="font-size:12px; color:#5b6b82; margin-top:6px;"></div>
+        </div>
         <script>
         const text = {payload};
-        const btn = window.parent.document.getElementById('{key}');
+        const btn = document.getElementById('{button_id}');
+        const status = document.getElementById('{status_id}');
         if (btn && !btn.dataset.copyBound) {{
             btn.dataset.copyBound = '1';
             btn.addEventListener('click', async () => {{
                 try {{
                     await navigator.clipboard.writeText(text);
-                }} catch (e) {{}}
+                    if (status) status.textContent = '已复制到剪贴板';
+                }} catch (e) {{
+                    if (status) status.textContent = '复制失败，请手动复制';
+                }}
             }});
         }}
         </script>
         """,
-        height=0,
+        height=58,
     )
 
 
@@ -2787,9 +2928,7 @@ def render_result_actions(section_name: str, current_input: str, previous_output
     copy_button_id = f"copy_result_btn_{section_name}_{function}".replace(" ", "_")
     col1, col2 = st.columns([1, 1])
     with col1:
-        render_copy_text(previous_output, copy_button_id)
-        if st.button("📋 复制结果", key=copy_button_id, use_container_width=True):
-            st.toast("结果已复制到系统剪贴板")
+        render_copy_text(previous_output, copy_button_id, button_label="📋 一键复制结果")
         st.download_button(
             "📄 下载结果.txt",
             previous_output.encode("utf-8"),
@@ -2858,6 +2997,9 @@ def handle_writing_process(section_name: str, function: str, domain: str, refere
         else:
             note_text = f"✅ 已针对【{section_name}】完成【{function}】，严格按单一职责执行。"
         st.session_state[note_key] = note_text
+        section_focus = SECTIONS.get(section_name, {}).get("focus", "学术表达")
+        section_goal = SECTIONS.get(section_name, {}).get("goal", "保持当前板块写作目标稳定。")
+        combo_guidance = build_function_section_guidance(function, section_name)
         st.session_state.writing_history.insert(0, {
             "id": len(st.session_state.writing_history) + 1,
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -2868,6 +3010,9 @@ def handle_writing_process(section_name: str, function: str, domain: str, refere
             "input": current_input,
             "output": final_output,
             "elapsed": f"{elapsed:.1f}s",
+            "section_focus": section_focus,
+            "section_goal": section_goal,
+            "combo_guidance": combo_guidance,
         })
         st.session_state.writing_history = st.session_state.writing_history[:100]
         status.update(label="处理完成", state="complete", expanded=False)
@@ -2903,6 +3048,8 @@ def render_writing_section(section_name: str, function: str, domain: str, refere
                     st.session_state[input_key] = extracted[:12000]
         current_input = st.session_state.get(input_key, "")
         input_language = detect_language(current_input)
+        section_profile = SECTIONS.get(section_name, {})
+        st.caption(section_profile.get("input_hint", "把最原始的想法、草稿、老师意见或文献信息放这里。"))
         st.caption(f"📊 {len(current_input)} 字符 | 语言: {'中文' if input_language == 'zh' else '英文' if input_language == 'en' else '待识别'}")
         btn1, btn2, btn3 = st.columns([3, 1, 1])
         with btn1:
@@ -2920,6 +3067,10 @@ def render_writing_section(section_name: str, function: str, domain: str, refere
     with col_right:
         st.markdown(f"### 🪄 处理结果 [{section_name}]")
         st.caption("右侧只展示处理后的结果，切换功能时不丢失。")
+        section_profile = SECTIONS.get(section_name, {})
+        checkpoints = section_profile.get("output_checkpoints", [])
+        if checkpoints:
+            st.caption("本板块检查点：" + " / ".join(checkpoints[:3]))
         st.text_area(
             "处理结果",
             key=output_key,
@@ -2988,6 +3139,8 @@ def render_writing_engine_sidebar() -> List[str]:
     func_info = FUNCTION_MATRIX.get(function, {})
     st.sidebar.markdown("<div class='sidebar-section-note'>当前功能说明</div>", unsafe_allow_html=True)
     st.sidebar.caption(func_info.get("description", ""))
+    active_section = st.session_state.get("writing_active_section", SECTION_NAMES[0])
+    st.sidebar.caption("板块增强点：" + build_function_section_guidance(function, active_section))
     for rule in func_info.get("rules", []):
         st.sidebar.caption(rule)
 
@@ -3037,6 +3190,8 @@ def render_writing_engine() -> None:
     domain = st.session_state.get("writing_domain", DOMAIN_ORDER[0])
     active_section = st.session_state.get("writing_active_section", SECTION_NAMES[0])
     focus_hint = SECTIONS.get(active_section, {}).get("focus", "聚焦学术表达")
+    goal_hint = SECTIONS.get(active_section, {}).get("goal", "保持当前板块写作目标稳定。")
+    combo_hint = build_function_section_guidance(function, active_section)
 
     header_left, header_right = st.columns([1, 1], gap="large")
     with header_left:
@@ -3053,7 +3208,9 @@ def render_writing_engine() -> None:
     <div class="subtle-kpi-row">
         <strong>当前功能</strong>：{function}<br>
         <strong>当前学科</strong>：{domain}<br>
-        <strong>焦点</strong>：{focus_hint}
+        <strong>焦点</strong>：{focus_hint}<br>
+        <strong>板块目标</strong>：{goal_hint}<br>
+        <strong>增强点</strong>：{combo_hint}
     </div>
 </div>
 """,
@@ -3096,6 +3253,10 @@ def render_history_panel() -> None:
             c1, c2, c3 = st.columns([3, 1, 1])
             with c1:
                 st.caption(f"领域: {entry['domain']} | 语言: {'中文' if entry['input_lang'] == 'zh' else '英文'} | 耗时: {entry['elapsed']}")
+                if entry.get("section_focus"):
+                    st.caption(f"板块焦点: {entry['section_focus']}")
+                if entry.get("combo_guidance"):
+                    st.caption(f"组合增强: {entry['combo_guidance']}")
             with c2:
                 if st.button("📥 恢复", key=f"restore_{entry['id']}"):
                     st.session_state[writing_input_key(entry['section'])] = entry['input']
@@ -3134,7 +3295,16 @@ def render_viz_engine_sidebar() -> None:
     render_sidebar_brand()
     st.sidebar.radio("核心引擎", [WRITING_PAGE, FORMATTING_PAGE, VIZ_PAGE, PPT_PAGE], key="engine_mode")
     render_sidebar_panel("视觉实验室", "材料科研单图生成、精修与版本迭代全部收敛到 viz_lab 命名空间。")
-    st.sidebar.caption(f"绘图模型：{GEMINI_MODEL}")
+    active_image_model = get_active_image_model()
+    image_options = st.session_state.get("runtime_image_model_options", list(GEMINI_MODEL_OPTIONS))
+    st.sidebar.caption(f"当前绘图模型：{active_image_model}")
+    st.sidebar.selectbox(
+        "切换绘图模型",
+        image_options,
+        index=image_options.index(active_image_model) if active_image_model in image_options else 0,
+        key="runtime_image_model",
+    )
+    st.sidebar.caption("网页切换仅影响当前会话；默认模型仍来自环境变量。")
     st.sidebar.caption("Claude 本地负责逻辑与代码，Gemini 仅负责图像生成。")
     st.sidebar.caption("当前配置摘要")
     st.sidebar.code(viz_state["logic_summary"], language=None)
@@ -3180,8 +3350,25 @@ def render_ppt_engine_sidebar() -> None:
     render_sidebar_brand()
     st.sidebar.radio("核心引擎", [WRITING_PAGE, FORMATTING_PAGE, VIZ_PAGE, PPT_PAGE], key="engine_mode")
     render_sidebar_panel("PPT大师", "面向科研汇报的单页式 PPT 工作台：提炼当前页、排版当前页、逐页加入 PPT。")
-    st.sidebar.caption(f"文本模型：{CLAUDE_MODEL}")
-    st.sidebar.caption(f"辅助图模型：{GEMINI_MODEL}")
+    active_text_model = get_active_text_model()
+    active_image_model = get_active_image_model()
+    text_options = st.session_state.get("runtime_text_model_options", list(CLAUDE_MODEL_OPTIONS))
+    image_options = st.session_state.get("runtime_image_model_options", list(GEMINI_MODEL_OPTIONS))
+    st.sidebar.caption(f"当前文本模型：{active_text_model}")
+    st.sidebar.selectbox(
+        "切换文本模型",
+        text_options,
+        index=text_options.index(active_text_model) if active_text_model in text_options else 0,
+        key="runtime_text_model",
+    )
+    st.sidebar.caption(f"当前辅助图模型：{active_image_model}")
+    st.sidebar.selectbox(
+        "切换绘图模型",
+        image_options,
+        index=image_options.index(active_image_model) if active_image_model in image_options else 0,
+        key="runtime_image_model",
+    )
+    st.sidebar.caption("网页切换仅影响当前会话；默认模型仍来自环境变量。")
     st.sidebar.caption("当前页摘要")
     summary = (
         f"标题：{ppt_state.get('page_title') or '未命名'}\n"
