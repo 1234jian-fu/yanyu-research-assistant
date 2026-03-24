@@ -2945,10 +2945,9 @@ def render_header() -> None:
 def render_result_actions(section_name: str, current_input: str, previous_output: str, function: str, domain: str) -> None:
     st.markdown("<div class='result-toolbar'><strong>快捷操作</strong></div>", unsafe_allow_html=True)
     copy_button_id = f"copy_result_btn_{section_name}_{function}".replace(" ", "_")
-    copy_text = extract_primary_output(previous_output, function)
     col1, col2 = st.columns([1, 1])
     with col1:
-        render_copy_text(copy_text, copy_button_id, button_label="📋 一键复制结果")
+        render_copy_text(previous_output, copy_button_id, button_label="📋 一键复制结果")
         st.download_button(
             "📄 下载结果.txt",
             previous_output.encode("utf-8"),
@@ -3008,7 +3007,8 @@ def handle_writing_process(section_name: str, function: str, domain: str, refere
                 return
 
         final_output = restore_hard_terms(response, term_mapping)
-        st.session_state[output_key] = final_output
+        primary_output = extract_primary_output(final_output, function)
+        st.session_state[output_key] = primary_output
         st.session_state[writing_term_count_key(section_name)] = len(term_mapping)
         if function == "🤖 去AI味 (Humanizer)":
             note_text = f"✅ 已针对【{section_name}】完成【{function}】，保持原语种，仅重构语序与节奏。"
@@ -3028,7 +3028,7 @@ def handle_writing_process(section_name: str, function: str, domain: str, refere
             "domain": domain,
             "input_lang": input_lang,
             "input": current_input,
-            "output": final_output,
+            "output": primary_output,
             "elapsed": f"{elapsed:.1f}s",
             "section_focus": section_focus,
             "section_goal": section_goal,
