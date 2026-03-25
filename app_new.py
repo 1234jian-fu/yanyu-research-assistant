@@ -354,8 +354,10 @@ CONFIG = {
         padding-top: 0.35rem;
         padding-bottom: 1.2rem;
     }
-    section[data-testid=\"stSidebar\"] {
+    section[data-testid="stSidebar"] {
         min-width: 20rem;
+        background: linear-gradient(180deg, #f7fbff 0%, #f2f7fd 100%);
+        border-right: 1px solid #dbe7f5;
     }
     section[data-testid=\"stSidebar\"] .block-container {
         padding-top: 0.75rem;
@@ -364,26 +366,25 @@ CONFIG = {
         display: flex;
         align-items: center;
         justify-content: center;
-        padding: 0.75rem 0.9rem;
-        margin: 0 0 0.8rem 0;
-        border-radius: 12px;
-        background: #E0F2FE;
-        color: #1E3A8A;
-        font-family: 'Poppins', sans-serif;
+        padding: 0.62rem 0.85rem;
+        margin: 0 0 0.75rem 0;
+        border-radius: 14px;
+        background: linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(243,248,255,0.96) 100%);
+        color: #17365d;
+        font-family: "Avenir Next", "PingFang SC", "Noto Sans SC", sans-serif;
         font-weight: 700;
-        font-size: 1.05rem;
-        letter-spacing: 0.12em;
-        text-transform: uppercase;
-        box-shadow: 0 6px 18px rgba(30, 58, 138, 0.10);
-        border: 1px solid rgba(30, 58, 138, 0.08);
+        font-size: 0.92rem;
+        letter-spacing: 0.08em;
+        box-shadow: 0 8px 22px rgba(15, 23, 42, 0.04);
+        border: 1px solid #d8e6f6;
     }
     .sidebar-panel {
-        padding: 0.7rem 0.8rem;
-        margin: 0.3rem 0 0.75rem 0;
-        border-radius: 12px;
-        background: rgba(255,255,255,0.72);
+        padding: 0.68rem 0.8rem;
+        margin: 0.28rem 0 0.72rem 0;
+        border-radius: 14px;
+        background: linear-gradient(180deg, rgba(255,255,255,0.88) 0%, rgba(247,251,255,0.88) 100%);
         border: 1px solid #dbe7f5;
-        box-shadow: 0 6px 18px rgba(15, 23, 42, 0.05);
+        box-shadow: 0 8px 20px rgba(15, 23, 42, 0.04);
     }
     section[data-testid=\"stSidebar\"] [data-testid=\"stExpander\"] {
         border: 1px solid #dbe7f5;
@@ -392,22 +393,23 @@ CONFIG = {
         overflow: hidden;
         margin-bottom: 0.55rem;
     }
-    section[data-testid=\"stSidebar\"] [data-testid=\"stExpander\"] details summary {
-        padding: 0.35rem 0.6rem;
+    section[data-testid="stSidebar"] [data-testid="stExpander"] details summary {
+        padding: 0.34rem 0.6rem;
+        font-weight: 600;
     }
     section[data-testid=\"stSidebar\"] .stRadio > div {
         gap: 0.35rem;
     }
     .sidebar-panel-title {
-        margin: 0 0 0.2rem 0;
-        color: #0f172a;
-        font-size: 0.92rem;
+        margin: 0 0 0.18rem 0;
+        color: #10233f;
+        font-size: 0.9rem;
         font-weight: 700;
     }
     .sidebar-panel-note {
         margin: 0;
         color: #64748b;
-        font-size: 0.78rem;
+        font-size: 0.77rem;
         line-height: 1.45;
     }
     .stTabs [data-baseweb=\"tab-list\"] {
@@ -422,33 +424,26 @@ CONFIG = {
         padding-top: 0.1rem;
     }
     .main-header {
-        text-align: left;
-        padding: 0.9rem 1.1rem;
-        background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 72%, #2563eb 100%);
-        color: white;
+        padding: 0.72rem 0.95rem;
+        background: linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(245,249,255,0.98) 100%);
+        color: #10233f;
         border-radius: 16px;
-        margin-bottom: 0.6rem;
-        box-shadow: 0 16px 38px rgba(15, 23, 42, 0.16);
-        border: 1px solid rgba(255, 255, 255, 0.12);
-        position: relative;
-        overflow: hidden;
+        margin-bottom: 0.55rem;
+        box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
+        border: 1px solid #dbe7f5;
     }
     .main-header::after {
-        content: \"\";
-        position: absolute;
-        inset: 0;
-        background: linear-gradient(120deg, rgba(255,255,255,0.10), transparent 42%, transparent 58%, rgba(255,255,255,0.08));
-        pointer-events: none;
+        display: none;
     }
     .main-header h1 {
         margin: 0;
-        font-size: 1.7rem;
+        font-size: 1.22rem;
         letter-spacing: 0.01em;
     }
     .main-header p {
-        margin: 0.3rem 0 0 0;
-        opacity: 0.88;
-        font-size: 0.92rem;
+        margin: 0.18rem 0 0 0;
+        color: #5a6f89;
+        font-size: 0.83rem;
     }
     .comparison-box, .engine-box, .workbench-card, .dashboard-stat {
         background: rgba(255, 255, 255, 0.94);
@@ -472,13 +467,143 @@ CONFIG = {
         padding: 0.75rem 0.9rem;
         margin-bottom: 0.55rem;
     }
+    .viz-lab-shell {
+        display: block;
+    }
+    .viz-thin-header {
+        padding: 0.72rem 0.9rem;
+        margin-bottom: 0.65rem;
+        background: linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(245,249,255,0.98) 100%);
+        border: 1px solid #dbe7f5;
+        border-radius: 16px;
+        box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
+    }
+    .viz-thin-header-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+    }
+    .viz-thin-header h3 {
+        margin: 0;
+        font-size: 1.02rem;
+        color: #10233f;
+    }
+    .viz-thin-header p {
+        margin: 0.16rem 0 0 0;
+        font-size: 0.83rem;
+        color: #5a6f89;
+    }
+    .viz-topbar {
+        padding: 0.8rem 0.9rem 0.45rem 0.9rem;
+        margin-bottom: 0.7rem;
+        background: linear-gradient(180deg, #f8fbff 0%, #f3f8ff 100%);
+        border: 1px solid #dbe7f5;
+        border-radius: 16px;
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.82);
+    }
+    .viz-topbar div[data-testid="stHorizontalBlock"] {
+        gap: 0.55rem;
+    }
+    .viz-topbar [data-baseweb="select"] > div,
+    .viz-topbar [data-baseweb="radio"] {
+        background: rgba(255,255,255,0.78);
+        border-radius: 12px;
+    }
+    .viz-main-card {
+        padding: 0.95rem 1rem;
+        margin-bottom: 0.75rem;
+        border-radius: 18px;
+        background: linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(248,251,255,0.98) 100%);
+        border: 1px solid #d7e4f4;
+        box-shadow: 0 10px 28px rgba(15, 23, 42, 0.05);
+    }
+    .viz-main-card + .viz-main-card {
+        margin-top: 0.1rem;
+    }
+    .viz-main-card div[data-testid="stHorizontalBlock"] {
+        gap: 0.65rem;
+    }
+    .viz-panel-label {
+        font-size: 0.86rem;
+        font-weight: 700;
+        margin-bottom: 0.38rem;
+        letter-spacing: 0.01em;
+    }
+    .viz-panel-note {
+        margin: 0 0 0.45rem 0;
+        color: #60748c;
+        font-size: 0.79rem;
+        line-height: 1.55;
+    }
+    .viz-secondary-card {
+        padding: 0.82rem 0.9rem;
+        margin-bottom: 0.72rem;
+        border-radius: 16px;
+        background: linear-gradient(180deg, #fbfdff 0%, #f7fbff 100%);
+        border: 1px solid #e1ebf7;
+    }
+    .viz-secondary-card div[data-testid="stExpander"] {
+        border: 1px solid #e4edf8;
+        border-radius: 14px;
+        background: rgba(255,255,255,0.74);
+        margin-bottom: 0.52rem;
+        overflow: hidden;
+    }
+    .viz-secondary-card details {
+        background: transparent;
+    }
+    .viz-secondary-card summary {
+        font-weight: 600;
+    }
+    .viz-secondary-card div[data-testid="stExpanderDetails"] {
+        padding-top: 0.18rem;
+    }
+    .viz-compact-status {
+        padding: 0.62rem 0.76rem;
+        margin: 0.55rem 0 0.75rem 0;
+        border-radius: 12px;
+        background: linear-gradient(180deg, #f4f8ff 0%, #eef6ff 100%);
+        border: 1px solid #d7e7fb;
+        color: #3d5b80;
+        font-size: 0.8rem;
+    }
+    .viz-status-pills {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.45rem;
+        margin: 0 0 0.7rem 0;
+    }
+    .viz-status-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.28rem;
+        padding: 0.3rem 0.66rem;
+        border-radius: 999px;
+        background: linear-gradient(180deg, #f3f8ff 0%, #edf5ff 100%);
+        border: 1px solid #d7e7fb;
+        color: #33567e;
+        font-size: 0.76rem;
+        line-height: 1;
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.82);
+    }
+    .viz-status-pill strong {
+        color: #11345d;
+        font-weight: 700;
+    }
+    .viz-quiet-block {
+        margin-top: 0.35rem;
+        color: #6a7c92;
+        font-size: 0.78rem;
+        line-height: 1.5;
+    }
     .viz-preview-shell {
         width: 100%;
         border: 1px solid #dbe7f5;
-        border-radius: 16px;
-        background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
-        box-shadow: inset 0 1px 0 rgba(255,255,255,0.85), 0 8px 24px rgba(15, 23, 42, 0.04);
-        padding: 0.8rem;
+        border-radius: 18px;
+        background: linear-gradient(180deg, #ffffff 0%, #f6faff 100%);
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.9), 0 10px 28px rgba(15, 23, 42, 0.05);
+        padding: 0.9rem;
         overflow: hidden;
     }
     .viz-preview-frame {
@@ -487,17 +612,19 @@ CONFIG = {
         display: flex;
         align-items: center;
         justify-content: center;
-        border-radius: 12px;
-        background: radial-gradient(circle at top, rgba(191, 219, 254, 0.35), rgba(255,255,255,0.92));
-        border: 1px dashed #cbd5e1;
+        border-radius: 14px;
+        background:
+            radial-gradient(circle at top, rgba(191, 219, 254, 0.38), rgba(255,255,255,0.96)),
+            linear-gradient(135deg, rgba(241,247,255,0.85) 0%, rgba(255,255,255,0.96) 100%);
+        border: 1px dashed #c7d6ea;
     }
     .viz-preview-frame img {
         max-width: 100%;
         width: auto;
         height: auto;
         object-fit: contain;
-        border-radius: 12px;
-        box-shadow: 0 10px 24px rgba(15, 23, 42, 0.10);
+        border-radius: 14px;
+        box-shadow: 0 14px 30px rgba(15, 23, 42, 0.12);
     }
     .viz-preview-empty {
         max-width: 78%;
@@ -568,12 +695,102 @@ CONFIG = {
     .subtle-kpi-row strong {
         color: #0f172a;
     }
+    .lab-thin-header {
+        padding: 0.74rem 0.95rem;
+        margin-bottom: 0.7rem;
+        background: linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(245,249,255,0.98) 100%);
+        border: 1px solid #dbe7f5;
+        border-radius: 16px;
+        box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
+    }
+    .lab-thin-header-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+    }
+    .lab-thin-header h3 {
+        margin: 0;
+        font-size: 1.02rem;
+        color: #10233f;
+    }
+    .lab-thin-header p {
+        margin: 0.16rem 0 0 0;
+        font-size: 0.83rem;
+        color: #5a6f89;
+    }
+    .lab-main-card {
+        padding: 0.95rem 1rem;
+        margin-bottom: 0.75rem;
+        border-radius: 18px;
+        background: linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(248,251,255,0.98) 100%);
+        border: 1px solid #d7e4f4;
+        box-shadow: 0 10px 28px rgba(15, 23, 42, 0.05);
+    }
+    .lab-secondary-card {
+        padding: 0.82rem 0.9rem;
+        margin-bottom: 0.72rem;
+        border-radius: 16px;
+        background: linear-gradient(180deg, #fbfdff 0%, #f7fbff 100%);
+        border: 1px solid #e1ebf7;
+    }
+    .lab-panel-label {
+        font-size: 0.86rem;
+        font-weight: 700;
+        margin-bottom: 0.38rem;
+        color: #10233f;
+        letter-spacing: 0.01em;
+    }
+    .lab-panel-note {
+        margin: 0 0 0.45rem 0;
+        color: #60748c;
+        font-size: 0.79rem;
+        line-height: 1.55;
+    }
+    .lab-status-pills {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.45rem;
+        margin: 0 0 0.7rem 0;
+    }
+    .lab-status-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.28rem;
+        padding: 0.3rem 0.66rem;
+        border-radius: 999px;
+        background: linear-gradient(180deg, #f3f8ff 0%, #edf5ff 100%);
+        border: 1px solid #d7e7fb;
+        color: #33567e;
+        font-size: 0.76rem;
+        line-height: 1;
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.82);
+    }
+    .lab-status-pill strong {
+        color: #11345d;
+        font-weight: 700;
+    }
+    .lab-quiet-note {
+        color: #6a7c92;
+        font-size: 0.78rem;
+        line-height: 1.5;
+    }
+    .lab-secondary-card div[data-testid="stExpander"] {
+        border: 1px solid #e4edf8;
+        border-radius: 14px;
+        background: rgba(255,255,255,0.74);
+        margin-bottom: 0.52rem;
+        overflow: hidden;
+    }
+    .lab-secondary-card summary {
+        font-weight: 600;
+    }
     .result-toolbar {
         margin: 0.55rem 0 0.15rem 0;
         padding: 0.68rem 0.8rem;
-        background: #f8fafc;
-        border: 1px solid #e2e8f0;
-        border-radius: 10px;
+        background: linear-gradient(180deg, #f8fbff 0%, #f4f8ff 100%);
+        border: 1px solid #dce8f6;
+        border-radius: 12px;
     }
     .sidebar-section-note {
         font-size: 0.8rem;
@@ -2913,7 +3130,7 @@ def inject_custom_css() -> None:
 
 
 def render_sidebar_brand() -> None:
-    st.sidebar.markdown("<div class='xueyan-badge'>Xueyan GOOD</div>", unsafe_allow_html=True)
+    st.sidebar.markdown("<div class='xueyan-badge'>学研 · Xueyan</div>", unsafe_allow_html=True)
 
 
 def render_sidebar_panel(title: str, note: str) -> None:
@@ -2924,22 +3141,21 @@ def render_sidebar_panel(title: str, note: str) -> None:
 
 
 def render_header() -> None:
+    api_status = "API 已连接" if CLAUDE_API_KEY else "API 未配置"
     st.markdown(
-        """
+        f"""
 <div class="main-header">
     <h1>学研 · Xueyan Workstation</h1>
-    <p>四引擎科研工作台 · 写作、排版、绘图与单页 PPT 在同一界面内协同完成</p>
+    <p>写作、排版、绘图与单页 PPT 在同一工作台内协同完成</p>
+    <div class="lab-status-pills" style="margin-top:0.42rem; margin-bottom:0;">
+        <span class="lab-status-pill"><strong>状态</strong>{api_status}</span>
+        <span class="lab-status-pill"><strong>规则包</strong>{len(append_skill_preview())} 组</span>
+        <span class="lab-status-pill"><strong>响应</strong>300s / 3次重试</span>
+    </div>
 </div>
 """,
         unsafe_allow_html=True,
     )
-    col1, col2, col3 = st.columns(3, gap="small")
-    with col1:
-        st.success("✅ API 就绪" if CLAUDE_API_KEY else "❌ API 未配置")
-    with col2:
-        st.info(f"📚 {len(append_skill_preview())} 组规则包")
-    with col3:
-        st.success("⏱️ 300s 超时 | 3次重试")
 
 
 def render_result_actions(section_name: str, current_input: str, previous_output: str, function: str, domain: str) -> None:
@@ -3047,12 +3263,13 @@ def render_writing_section(section_name: str, function: str, domain: str, refere
 
     col_left, col_right = st.columns([1, 1], gap="large")
     with col_left:
-        st.markdown(f"### 📥 原文输入 [{section_name}]")
-        st.caption("把最原始的想法、草稿、老师意见或文献信息放这里。")
+        st.markdown('<div class="lab-main-card">', unsafe_allow_html=True)
+        st.markdown(f'<div class="lab-panel-label">原文输入 · {section_name}</div>', unsafe_allow_html=True)
+        st.markdown('<div class="lab-panel-note">把草稿、老师意见或文献信息直接放这里。</div>', unsafe_allow_html=True)
         st.text_area(
             "原文输入",
             key=input_key,
-            height=380,
+            height=400,
             label_visibility="collapsed",
         )
         literature_file = st.file_uploader(
@@ -3069,8 +3286,11 @@ def render_writing_section(section_name: str, function: str, domain: str, refere
         current_input = st.session_state.get(input_key, "")
         input_language = detect_language(current_input)
         section_profile = SECTIONS.get(section_name, {})
-        st.caption(section_profile.get("input_hint", "把最原始的想法、草稿、老师意见或文献信息放这里。"))
-        st.caption(f"📊 {len(current_input)} 字符 | 语言: {'中文' if input_language == 'zh' else '英文' if input_language == 'en' else '待识别'}")
+        st.markdown(
+            f"<div class=\"lab-status-pills\"><span class=\"lab-status-pill\"><strong>字数</strong>{len(current_input)}</span><span class=\"lab-status-pill\"><strong>语言</strong>{'中文' if input_language == 'zh' else '英文' if input_language == 'en' else '待识别'}</span></div>",
+            unsafe_allow_html=True,
+        )
+        st.markdown(f"<div class='lab-quiet-note'>{section_profile.get('input_hint', '把最原始的想法、草稿、老师意见或文献信息放这里。')}</div>", unsafe_allow_html=True)
         btn1, btn2, btn3 = st.columns([3, 1, 1])
         with btn1:
             if st.button(f"✨ 执行 {function}", key=f"process_{section_name}", type="primary", use_container_width=True):
@@ -3083,18 +3303,20 @@ def render_writing_section(section_name: str, function: str, domain: str, refere
         with btn3:
             if st.button("🔄", key=f"rerun_{section_name}"):
                 handle_writing_process(section_name, function, domain, reference_styles)
+        st.markdown('</div>', unsafe_allow_html=True)
 
     with col_right:
-        st.markdown(f"### 🪄 处理结果 [{section_name}]")
-        st.caption("右侧只展示处理后的结果，切换功能时不丢失。")
+        st.markdown('<div class="lab-main-card">', unsafe_allow_html=True)
+        st.markdown(f'<div class="lab-panel-label">处理结果 · {section_name}</div>', unsafe_allow_html=True)
+        st.markdown('<div class="lab-panel-note">这里只显示当前板块的处理结果。</div>', unsafe_allow_html=True)
         section_profile = SECTIONS.get(section_name, {})
         checkpoints = section_profile.get("output_checkpoints", [])
         if checkpoints:
-            st.caption("本板块检查点：" + " / ".join(checkpoints[:3]))
+            st.markdown(f"<div class='lab-quiet-note'>检查点：{' / '.join(checkpoints[:3])}</div>", unsafe_allow_html=True)
         st.text_area(
             "处理结果",
             key=output_key,
-            height=380,
+            height=400,
             disabled=True,
             label_visibility="collapsed",
         )
@@ -3102,12 +3324,12 @@ def render_writing_section(section_name: str, function: str, domain: str, refere
         if previous_output:
             render_result_actions(section_name, st.session_state.get(input_key, ""), previous_output, function, domain)
             if previous_note:
-                st.caption(previous_note)
+                st.markdown(f"<div class='lab-quiet-note'>{previous_note}</div>", unsafe_allow_html=True)
             lock_hint = domain_profile.get("hard_lock_terms", [])[:2] + domain_profile.get("hard_lock_regex", [])[:1]
             if term_count:
-                st.caption(f"已按当前学科自动保护 {term_count} 个核心锁项：{', '.join(lock_hint) if lock_hint else 'LaTeX / 术语 / 单位'}。")
+                st.markdown(f"<div class='lab-quiet-note'>已保护 {term_count} 个核心锁项：{', '.join(lock_hint) if lock_hint else 'LaTeX / 术语 / 单位'}。</div>", unsafe_allow_html=True)
             else:
-                st.caption("已启用当前学科核心锁，LaTeX 公式与术语默认不改写。")
+                st.markdown("<div class='lab-quiet-note'>已启用学科核心锁，LaTeX 公式与术语默认不改写。</div>", unsafe_allow_html=True)
             meta = {
                 "function": function,
                 "section": section_name,
@@ -3137,7 +3359,8 @@ def render_writing_section(section_name: str, function: str, domain: str, refere
                     ):
                         st.toast("Redlining 文档已准备下载")
         else:
-            st.caption("这里会生成可直接拿去改稿的版本。")
+            st.markdown("<div class='lab-quiet-note'>这里会生成可直接拿去改稿的版本。</div>", unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
 
 
 def get_function_nav_index(current_function: str) -> int:
@@ -3197,9 +3420,8 @@ def render_writing_engine_sidebar() -> List[str]:
                 active = st.session_state.writing_active_section
                 st.session_state[writing_input_key(active)] = extracted[:10000]
 
-    preview = append_skill_preview()
     st.sidebar.markdown("---")
-    st.sidebar.caption(f"规则包：{', '.join(f'{k}={v}' for k, v in preview.items())}")
+    st.sidebar.caption("规则包已加载，可按当前功能与学科直接调用。")
     return reference_styles
 
 
@@ -3213,30 +3435,30 @@ def render_writing_engine() -> None:
     goal_hint = SECTIONS.get(active_section, {}).get("goal", "保持当前板块写作目标稳定。")
     combo_hint = build_function_section_guidance(function, active_section)
 
-    header_left, header_right = st.columns([1, 1], gap="large")
-    with header_left:
-        st.markdown(
-            f"""
-<div class="workbench-card compact">
-    <div class="workbench-title">
+    st.markdown(
+        f"""
+<div class="lab-thin-header">
+    <div class="lab-thin-header-row">
         <div>
-            <h3>写作引擎工作台</h3>
-            <p>保持左右双栏直达输入/输出，减少首屏干扰。</p>
+            <h3>论文写作工作台</h3>
+            <p>围绕当前板块，直接完成输入、处理和结果回看。</p>
         </div>
         <span class="workbench-chip">{active_section}</span>
     </div>
-    <div class="subtle-kpi-row">
-        <strong>当前功能</strong>：{function}<br>
-        <strong>当前学科</strong>：{domain}<br>
-        <strong>焦点</strong>：{focus_hint}<br>
-        <strong>板块目标</strong>：{goal_hint}<br>
-        <strong>增强点</strong>：{combo_hint}
-    </div>
 </div>
 """,
+        unsafe_allow_html=True,
+    )
+
+    top_left, top_right = st.columns([1.25, 0.95], gap="large")
+    with top_left:
+        st.markdown(
+            f"<div class=\"lab-status-pills\"><span class=\"lab-status-pill\"><strong>功能</strong>{function}</span><span class=\"lab-status-pill\"><strong>学科</strong>{domain}</span><span class=\"lab-status-pill\"><strong>焦点</strong>{focus_hint}</span></div>",
             unsafe_allow_html=True,
         )
-    with header_right:
+        st.markdown(f"<div class='lab-quiet-note'>板块目标：{goal_hint}<br>增强点：{combo_hint}</div>", unsafe_allow_html=True)
+    with top_right:
+        st.markdown('<div class="lab-secondary-card">', unsafe_allow_html=True)
         st.selectbox(
             "当前写作板块",
             SECTION_NAMES,
@@ -3244,18 +3466,17 @@ def render_writing_engine() -> None:
             key="writing_active_section_selector",
         )
         st.session_state.writing_active_section = st.session_state["writing_active_section_selector"]
-        st.caption("保持首屏直接进入双栏输入/输出区。")
+        st.markdown("<div class='lab-quiet-note'>保持双栏主工作流，其他信息放到次级区域。</div>", unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
 
     active_section = st.session_state.get("writing_active_section", SECTION_NAMES[0])
     render_writing_section(active_section, function, domain, reference_styles)
-    with st.expander("⏰ 版本时光机", expanded=False):
+    with st.expander("版本时光机", expanded=False):
         render_history_panel()
 
 
 def render_history_panel() -> None:
-    st.caption("当前学科核心锁已启用：LaTeX 公式、术语 regex 与关键缩写默认不改写。")
-    st.markdown("---")
-    st.subheader("⏰ 版本时光机")
+    st.markdown("<div class='lab-quiet-note'>当前学科核心锁已启用：LaTeX 公式、术语 regex 与关键缩写默认不改写。</div>", unsafe_allow_html=True)
     filter_section = st.selectbox("筛选板块", ["全部"] + list(SECTIONS.keys()), key="history_section_filter")
     filter_function = st.selectbox("筛选功能", ["全部"] + list(FUNCTION_MATRIX.keys()), key="history_function_filter")
     filtered_history = st.session_state.writing_history
@@ -3272,11 +3493,12 @@ def render_history_panel() -> None:
         with st.expander(f"#{entry['id']} · {entry['function']} · {entry['section']} · {entry['timestamp']}"):
             c1, c2, c3 = st.columns([3, 1, 1])
             with c1:
-                st.caption(f"领域: {entry['domain']} | 语言: {'中文' if entry['input_lang'] == 'zh' else '英文'} | 耗时: {entry['elapsed']}")
+                meta_bits = [f"领域: {entry['domain']}", f"语言: {'中文' if entry['input_lang'] == 'zh' else '英文'}", f"耗时: {entry['elapsed']}"]
+                st.markdown(f"<div class='lab-quiet-note'>{' | '.join(meta_bits)}</div>", unsafe_allow_html=True)
                 if entry.get("section_focus"):
-                    st.caption(f"板块焦点: {entry['section_focus']}")
+                    st.markdown(f"<div class='lab-quiet-note'>板块焦点：{entry['section_focus']}</div>", unsafe_allow_html=True)
                 if entry.get("combo_guidance"):
-                    st.caption(f"组合增强: {entry['combo_guidance']}")
+                    st.markdown(f"<div class='lab-quiet-note'>组合增强：{entry['combo_guidance']}</div>", unsafe_allow_html=True)
             with c2:
                 if st.button("📥 恢复", key=f"restore_{entry['id']}"):
                     st.session_state[writing_input_key(entry['section'])] = entry['input']
@@ -3305,8 +3527,8 @@ def render_formatting_engine_sidebar() -> None:
         format_func=lambda key: get_format_ruleset_profile(key)["label"],
         key="format_ruleset",
     )
-    render_sidebar_panel("格式对齐", "排版引擎与写作引擎状态完全隔离，只保留确定性审计与自动修复。")
-    st.sidebar.caption("规则来源参考 thesis-skills 的 check/fix 闭环，但这里直接面向 Word 文档执行。")
+    render_sidebar_panel("格式对齐", "面向 Word 的确定性审计与自动修复。")
+    st.sidebar.caption("指南、上传、审计与导出保持独立闭环。")
 
 
 def render_viz_engine_sidebar() -> None:
@@ -3314,7 +3536,7 @@ def render_viz_engine_sidebar() -> None:
     viz_state["logic_summary"] = build_viz_logic_summary(viz_state)
     render_sidebar_brand()
     st.sidebar.radio("核心引擎", [WRITING_PAGE, FORMATTING_PAGE, VIZ_PAGE, PPT_PAGE], key="engine_mode")
-    render_sidebar_panel("视觉实验室", "材料科研单图生成、精修与版本迭代全部收敛到 viz_lab 命名空间。")
+    render_sidebar_panel("视觉实验室", "材料科研单图生成、精修与版本迭代工作台。")
     active_image_model = get_active_image_model()
     image_options = st.session_state.get("runtime_image_model_options", list(GEMINI_MODEL_OPTIONS))
     st.sidebar.caption(f"当前绘图模型：{active_image_model}")
@@ -3324,10 +3546,9 @@ def render_viz_engine_sidebar() -> None:
         index=image_options.index(active_image_model) if active_image_model in image_options else 0,
         key="runtime_image_model",
     )
-    st.sidebar.caption("网页切换仅影响当前会话；默认模型仍来自环境变量。")
-    st.sidebar.caption("Claude 本地负责逻辑与代码，Gemini 仅负责图像生成。")
-    st.sidebar.caption("当前配置摘要")
-    st.sidebar.code(viz_state["logic_summary"], language=None)
+    st.sidebar.caption("网页切换仅影响当前会话。")
+    with st.sidebar.expander("查看自动逻辑摘要", expanded=False):
+        st.code(viz_state["logic_summary"] or "填写参数后，这里会更新摘要。", language=None)
 
 
 def render_viz_history_panel(viz_state: dict) -> None:
@@ -3337,16 +3558,14 @@ def render_viz_history_panel(viz_state: dict) -> None:
     for entry in viz_state["history"]:
         title = f"{entry['timestamp']} · {entry['scene']} · {entry['style']}"
         with st.expander(title, expanded=False):
-            st.caption(f"链路: {entry.get('parent_id') or 'ROOT'} → {entry['id']}")
-            st.caption(entry.get("description", "")[:180] or "无描述")
-            render_viz_image_slot(entry.get("image_url", ""), empty_text="该历史版本没有可预览图片。", container_height=240, image_max_height=190)
-            meta_bits = []
+            meta_bits = [f"链路：{entry.get('parent_id') or 'ROOT'} → {entry['id']}"]
             if entry.get("iteration_mode"):
                 meta_bits.append(f"模式：{entry['iteration_mode']}")
             if entry.get("current_seed") is not None:
                 meta_bits.append(f"Seed：{entry['current_seed']}")
-            if meta_bits:
-                st.caption(" | ".join(meta_bits))
+            st.caption(" | ".join(meta_bits))
+            st.caption(entry.get("description", "")[:140] or "无描述")
+            render_viz_image_slot(entry.get("image_url", ""), empty_text="该历史版本没有可预览图片。", container_height=220, image_max_height=180)
             c1, c2 = st.columns([1, 1])
             with c1:
                 if st.button("📥 恢复此版本", key=f"viz_restore_{entry['id']}", use_container_width=True):
@@ -3369,7 +3588,7 @@ def render_ppt_engine_sidebar() -> None:
     ppt_state = init_ppt_state()
     render_sidebar_brand()
     st.sidebar.radio("核心引擎", [WRITING_PAGE, FORMATTING_PAGE, VIZ_PAGE, PPT_PAGE], key="engine_mode")
-    render_sidebar_panel("PPT大师", "面向科研汇报的单页式 PPT 工作台：提炼当前页、排版当前页、逐页加入 PPT。")
+    render_sidebar_panel("PPT 工作台", "围绕当前页完成提炼、预览与组装。")
     active_text_model = get_active_text_model()
     active_image_model = get_active_image_model()
     text_options = st.session_state.get("runtime_text_model_options", list(CLAUDE_MODEL_OPTIONS))
@@ -3388,8 +3607,7 @@ def render_ppt_engine_sidebar() -> None:
         index=image_options.index(active_image_model) if active_image_model in image_options else 0,
         key="runtime_image_model",
     )
-    st.sidebar.caption("网页切换仅影响当前会话；默认模型仍来自环境变量。")
-    st.sidebar.caption("当前页摘要")
+    st.sidebar.caption("网页切换仅影响当前会话。")
     summary = (
         f"标题：{ppt_state.get('page_title') or '未命名'}\n"
         f"类型：{ppt_state.get('page_type', '结果页')}\n"
@@ -3397,7 +3615,8 @@ def render_ppt_engine_sidebar() -> None:
         f"输入：{detect_ppt_input_mode(ppt_state)}\n"
         f"组装页数：{len(ppt_state.get('assembly_pages', []))}"
     )
-    st.sidebar.code(summary, language=None)
+    with st.sidebar.expander("查看当前页摘要", expanded=False):
+        st.code(summary, language=None)
 
 
 def render_ppt_history_panel(ppt_state: dict) -> None:
@@ -3433,23 +3652,28 @@ def render_viz_engine() -> None:
 
     st.markdown(
         """
-<div class="workbench-card compact">
-    <div class="workbench-title">
-        <div>
-            <h3>视觉实验室工作台</h3>
-            <p>材料科研单图生成 → Prompt 控制台 → 基于当前结果继续迭代。</p>
+<div class="viz-lab-shell">
+    <div class="viz-thin-header">
+        <div class="viz-thin-header-row">
+            <div>
+                <h3>科研绘图工作台</h3>
+                <p>围绕当前图，快速完成描述、生成与精修。</p>
+            </div>
+            <span class="workbench-chip">Visualization Lab</span>
         </div>
-        <span class="workbench-chip">Visualization Lab</span>
     </div>
 </div>
 """,
         unsafe_allow_html=True,
     )
 
-    left_col, right_col = st.columns([1, 2], gap="large")
+    left_col, right_col = st.columns([0.92, 1.78], gap="large")
 
     with left_col:
-        with st.expander("① 材料基础", expanded=True):
+        st.markdown('<div class="viz-secondary-card">', unsafe_allow_html=True)
+        st.markdown('<div class="viz-panel-label">参数区</div>', unsafe_allow_html=True)
+        st.markdown('<div class="viz-panel-note">高频参数已前置到右侧，这里保留完整设置能力。</div>', unsafe_allow_html=True)
+        with st.expander("材料基础", expanded=True):
             viz_state["material_name"] = st.text_input(
                 "材料名称",
                 value=viz_state.get("material_name", ""),
@@ -3459,19 +3683,18 @@ def render_viz_engine() -> None:
             viz_state["component_tags_text"] = st.text_area(
                 "物质组成 / 关键组分",
                 value=viz_state.get("component_tags_text", ""),
-                height=90,
-                placeholder="每行一个，或用逗号分隔，例如：MoS2 纳米片, 石墨烯, 空位缺陷, 金属纳米颗粒",
+                height=82,
+                placeholder="每行一个，或用逗号分隔",
                 key="viz_component_tags_text",
             )
             viz_state["structure_notes"] = st.text_area(
                 "结构补充说明",
                 value=viz_state.get("structure_notes", ""),
-                height=80,
-                placeholder="例如：核壳结构 / 多孔骨架 / 层状堆叠 / 表面包覆 / 界面异质结",
+                height=78,
+                placeholder="例如：核壳结构 / 多孔骨架 / 层状堆叠",
                 key="viz_structure_notes",
             )
-
-        with st.expander("② 场景与用途", expanded=True):
+        with st.expander("场景与用途", expanded=True):
             usage_options = ["论文主图", "论文 TOC 图", "汇报展示", "基金申请", "教学示意", "社媒科普"]
             viz_state["usage"] = st.selectbox(
                 "图像用途",
@@ -3489,21 +3712,13 @@ def render_viz_engine() -> None:
             viz_state["emphasis_points_text"] = st.text_area(
                 "强调重点",
                 value=viz_state.get("emphasis_points_text", ""),
-                height=80,
-                placeholder="例如：突出离子扩散路径、界面反应区域、层间结构变化、局部放大区域",
+                height=78,
+                placeholder="例如：突出离子扩散路径、界面反应区域",
                 key="viz_emphasis_points_text",
             )
-
-        with st.expander("③ 风格与表达", expanded=True):
-            style_options = list(VIZ_STYLE_PROMPTS.keys())
-            viz_state["style"] = st.selectbox(
-                "视觉风格",
-                style_options,
-                index=style_options.index(viz_state.get("style", style_options[0])) if viz_state.get("style", style_options[0]) in style_options else 0,
-                key="viz_style",
-            )
+        with st.expander("风格扩展", expanded=False):
             style_reference_file = st.file_uploader(
-                "上传风格参考图（例如：Nature 期刊插图）",
+                "上传风格参考图",
                 type=["png", "jpg", "jpeg"],
                 key="viz_style_reference_file",
             )
@@ -3514,7 +3729,7 @@ def render_viz_engine() -> None:
             elif viz_state.get("style_reference_name") and not viz_state.get("style_reference_image"):
                 viz_state["style_reference_name"] = ""
             if viz_state.get("style_reference_image"):
-                st.image(viz_state["style_reference_image"]["bytes"], caption=viz_state.get("style_reference_name") or "风格参考图", width=160)
+                st.image(viz_state["style_reference_image"]["bytes"], caption=viz_state.get("style_reference_name") or "风格参考图", width=180)
             viz_state["style_strength"] = st.slider(
                 "风格模仿强度",
                 min_value=0.0,
@@ -3523,23 +3738,7 @@ def render_viz_engine() -> None:
                 step=0.1,
                 key="viz_style_strength",
             )
-            col1, col2 = st.columns(2)
-            with col1:
-                viz_state["label_mode"] = st.radio(
-                    "标注模式",
-                    ["无文字版", "有文字版"],
-                    horizontal=True,
-                    index=0 if viz_state.get("label_mode", "无文字版") == "无文字版" else 1,
-                    key="viz_label_mode",
-                )
-            with col2:
-                viz_state["label_language"] = st.radio(
-                    "标签语言",
-                    ["中文", "英文"],
-                    horizontal=True,
-                    index=0 if viz_state.get("label_language", "中文") == "中文" else 1,
-                    key="viz_label_language",
-                )
+        with st.expander("标注内容", expanded=viz_state.get("label_mode") == "有文字版"):
             if viz_state.get("label_mode") == "有文字版":
                 content_modes = ["自动生成后编辑（推荐）", "手动填写", "仅自动生成"]
                 viz_state["label_content_mode"] = st.selectbox(
@@ -3552,48 +3751,85 @@ def render_viz_engine() -> None:
                 viz_state["auto_generated_labels"] = suggested_terms
                 if viz_state.get("label_content_mode") != "手动填写" and not viz_state.get("label_terms_text", "").strip():
                     viz_state["label_terms_text"] = "\n".join(suggested_terms)
-                label_help = "每行一个标签；系统会按中文/英文模式约束 Gemini 使用这些标识。"
                 label_title = "中文标识内容" if viz_state.get("label_language") == "中文" else "英文标识内容"
                 viz_state["label_terms_text"] = st.text_area(
                     label_title,
                     value=viz_state.get("label_terms_text", ""),
                     height=110,
                     placeholder="例如：离子迁移路径\n界面反应区\n结构示意",
-                    help=label_help,
                     key="viz_label_terms_text",
                 )
                 if suggested_terms:
                     st.caption(f"自动建议：{' ｜ '.join(suggested_terms)}")
             else:
                 viz_state["final_label_terms"] = []
-            col3, col4 = st.columns(2)
-            with col3:
-                density_options = ["低", "中", "高"]
-                viz_state["info_density"] = st.selectbox(
-                    "信息密度",
-                    density_options,
-                    index=density_options.index(viz_state.get("info_density", "中")) if viz_state.get("info_density", "中") in density_options else 1,
-                    key="viz_info_density",
-                )
-            with col4:
-                ratio_options = ["1:1", "4:3", "3:2", "16:9", "9:16"]
-                viz_state["aspect_ratio"] = st.selectbox(
-                    "输出比例",
-                    ratio_options,
-                    index=ratio_options.index(viz_state.get("aspect_ratio", "1:1")) if viz_state.get("aspect_ratio", "1:1") in ratio_options else 0,
-                    key="viz_aspect_ratio",
-                )
-
-        with st.expander("④ 自动逻辑摘要", expanded=True):
+                st.caption("当前为无文字版；切换到有文字版后可编辑标签内容。")
+        with st.expander("自动逻辑摘要", expanded=False):
             viz_state["logic_summary"] = build_viz_logic_summary(viz_state)
-            st.info(viz_state["logic_summary"] or "填写左侧信息后，这里会自动生成逻辑摘要。")
+            st.caption(viz_state["logic_summary"] or "填写参数后，这里会自动生成摘要。")
+        st.markdown('</div>', unsafe_allow_html=True)
 
     with right_col:
-        st.markdown("### 图像描述")
+        style_options = list(VIZ_STYLE_PROMPTS.keys())
+        st.markdown(
+            """
+<div class="viz-topbar">
+    <div class="viz-topbar-title">
+        <strong>核心参数</strong>
+        <span>先设关键项，再生成结果。</span>
+    </div>
+</div>
+""",
+            unsafe_allow_html=True,
+        )
+        top1, top2, top3, top4, top5 = st.columns(5)
+        with top1:
+            viz_state["label_mode"] = st.radio(
+                "标注模式",
+                ["无文字版", "有文字版"],
+                horizontal=True,
+                index=0 if viz_state.get("label_mode", "无文字版") == "无文字版" else 1,
+                key="viz_label_mode",
+            )
+        with top2:
+            viz_state["label_language"] = st.radio(
+                "标签语言",
+                ["中文", "英文"],
+                horizontal=True,
+                index=0 if viz_state.get("label_language", "中文") == "中文" else 1,
+                key="viz_label_language",
+            )
+        with top3:
+            viz_state["style"] = st.selectbox(
+                "风格",
+                style_options,
+                index=style_options.index(viz_state.get("style", style_options[0])) if viz_state.get("style", style_options[0]) in style_options else 0,
+                key="viz_style",
+            )
+        with top4:
+            density_options = ["低", "中", "高"]
+            viz_state["info_density"] = st.selectbox(
+                "信息密度",
+                density_options,
+                index=density_options.index(viz_state.get("info_density", "中")) if viz_state.get("info_density", "中") in density_options else 1,
+                key="viz_info_density",
+            )
+        with top5:
+            ratio_options = ["1:1", "4:3", "3:2", "16:9", "9:16"]
+            viz_state["aspect_ratio"] = st.selectbox(
+                "输出比例",
+                ratio_options,
+                index=ratio_options.index(viz_state.get("aspect_ratio", "1:1")) if viz_state.get("aspect_ratio", "1:1") in ratio_options else 0,
+                key="viz_aspect_ratio",
+            )
+
+        st.markdown('<div class="viz-main-card">', unsafe_allow_html=True)
+        st.markdown('<div class="viz-panel-label">图像描述</div>', unsafe_allow_html=True)
+        st.markdown('<div class="viz-panel-note">直接写你想表达的科研图像内容。</div>', unsafe_allow_html=True)
         viz_state["description"] = st.text_area(
-            "请描述你想表达的科学内容",
+            "图像描述",
             value=viz_state.get("description", ""),
-            height=180,
+            height=230,
             placeholder="例如：展示层状材料中离子在层间扩散，并突出表面异质结对反应动力学的促进作用。",
             key="viz_description",
         )
@@ -3601,24 +3837,14 @@ def render_viz_engine() -> None:
         prompt_bundle = build_viz_prompt_bundle(viz_state)
         viz_state.update(prompt_bundle)
 
-        st.markdown("### Prompt 控制台")
-        tab1, tab2, tab3, tab4 = st.tabs(["最终 Gemini Prompt", "Skills 基础稿", "优化增强稿", "硬约束"])
-        with tab1:
-            st.code(viz_state["final_prompt"], language="text")
-        with tab2:
-            st.code(viz_state.get("skill_prompt", ""), language="text")
-        with tab3:
-            st.code(viz_state.get("optimized_prompt", ""), language="text")
-        with tab4:
-            st.code(viz_state.get("hard_constraints", ""), language="text")
-
-        action_col1, action_col2, action_col3 = st.columns([1, 1, 2])
+        action_col1, action_col2, action_col3 = st.columns([1.1, 0.95, 1.35])
         with action_col1:
             generate_clicked = st.button("生成图片", type="primary", use_container_width=True, key="viz_generate")
         with action_col2:
             regenerate_clicked = st.button("重新生成", use_container_width=True, key="viz_regenerate")
         with action_col3:
-            st.caption("默认生成单张结果，后续围绕当前结果继续迭代。")
+            st.markdown('<div class="viz-quiet-block">默认围绕当前图逐步迭代，适合持续微调。</div>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
 
         if generate_clicked or regenerate_clicked:
             if not viz_state["description"].strip():
@@ -3657,9 +3883,17 @@ def render_viz_engine() -> None:
                     viz_state["last_error"] = ""
                     append_viz_history_entry(viz_state, prompt_to_use)
 
-        st.markdown("### 当前结果")
+        st.markdown('<div class="viz-main-card">', unsafe_allow_html=True)
+        st.markdown('<div class="viz-panel-label">当前结果</div>', unsafe_allow_html=True)
+        st.markdown('<div class="viz-panel-note">当前版本会固定展示在这里，便于对照与继续修改。</div>', unsafe_allow_html=True)
+        result_name = viz_state.get("current_result_id") or "未生成"
+        seed_label = viz_state.get("current_image_seed")
+        st.markdown(
+            f"<div class=\"viz-status-pills\"><span class=\"viz-status-pill\"><strong>结果</strong>{result_name}</span><span class=\"viz-status-pill\"><strong>Seed</strong>{seed_label if seed_label is not None else '自动'}</span><span class=\"viz-status-pill\"><strong>模式</strong>{viz_state.get('iteration_mode') or 'text-to-image'}</span></div>",
+            unsafe_allow_html=True,
+        )
         if viz_state.get("current_image_url"):
-            render_viz_image_slot(viz_state["current_image_url"], empty_text="尚未生成图片。", container_height=380, image_max_height=350)
+            render_viz_image_slot(viz_state["current_image_url"], empty_text="尚未生成图片。", container_height=500, image_max_height=460)
             dcol1, dcol2 = st.columns([1, 1])
             with dcol1:
                 st.download_button(
@@ -3671,25 +3905,26 @@ def render_viz_engine() -> None:
                     key="viz_current_download",
                 )
             with dcol2:
-                seed_label = viz_state.get("current_image_seed")
-                st.success(f"当前结果已就绪，可直接继续修改。Seed：{seed_label if seed_label is not None else '自动'}")
+                st.markdown('<div class="viz-compact-status">当前结果已就绪，可直接继续修改。</div>', unsafe_allow_html=True)
         else:
-            render_viz_image_slot("", empty_text="尚未生成图片。填写左侧参数和描述后，点击“生成图片”。", container_height=380, image_max_height=350)
+            render_viz_image_slot("", empty_text="填写图像描述后点击“生成图片”。", container_height=500, image_max_height=460)
+        st.markdown('</div>', unsafe_allow_html=True)
 
-        st.markdown("### 继续修改当前结果")
-        st.caption("工作流：先把当前图反馈给 Gemini 进行图像理解，再由 Claude 按你填写的修改路径与要求生成针对 Gemini 的局部修改提示词，最后执行局部生图。")
+        st.markdown('<div class="viz-secondary-card">', unsafe_allow_html=True)
+        st.markdown('<div class="viz-panel-label">继续修改当前结果</div>', unsafe_allow_html=True)
+        st.markdown('<div class="viz-panel-note">生成后可在这里做局部微调，不打断主流程。</div>', unsafe_allow_html=True)
         viz_state["iteration_instruction"] = st.text_input(
-            "修改框",
+            "继续修改当前结果",
             value=viz_state.get("iteration_instruction", ""),
             placeholder="例如：把 Li+ 改为红色 / 把右上角放大框增强一点",
             key="viz_iteration_instruction",
         )
-        tweak_col1, tweak_col2 = st.columns(2)
+        tweak_col1, tweak_col2 = st.columns([1.2, 0.8])
         with tweak_col1:
             viz_state["local_area_hint"] = st.text_input(
                 "修改路径 / 局部区域",
                 value=viz_state.get("local_area_hint", ""),
-                placeholder="例如：右上角放大框 > 箭头路径 / 中央主体颗粒 / 左侧标签区",
+                placeholder="例如：右上角放大框 > 箭头路径 / 中央主体颗粒",
                 key="viz_local_area_hint",
             )
         with tweak_col2:
@@ -3708,13 +3943,8 @@ def render_viz_engine() -> None:
         )
         iteration_preview_prompt = build_viz_iteration_prompt(viz_state) if viz_state.get("iteration_instruction", "").strip() else ""
         viz_state["iteration_preview_prompt"] = iteration_preview_prompt
-        st.caption(f"当前局部修改链路：参考原图理解 → Claude 生成 Gemini 专用局部修改 Prompt → Gemini 执行局部重绘 | Seed：{viz_state.get('current_seed') if viz_state.get('current_seed') is not None else '自动'}")
-        with st.expander("局部修改 Prompt 预览", expanded=False):
-            if iteration_preview_prompt:
-                st.code(iteration_preview_prompt, language="text")
-            else:
-                st.info("填写修改框后，这里会显示最终发给 Gemini 的局部修改 Prompt。")
         apply_edit_clicked = st.button("应用修改", use_container_width=True, key="viz_apply_edit")
+        st.markdown('<div class="viz-quiet-block">保持原始构图时，更适合做局部修正与版本迭代。</div>', unsafe_allow_html=True)
         if apply_edit_clicked:
             if not viz_state.get("current_image_url"):
                 st.warning("请先生成当前图片。")
@@ -3756,7 +3986,26 @@ def render_viz_engine() -> None:
                     viz_state["current_image_seed"] = result.get("seed")
                     viz_state["last_error"] = ""
                     append_viz_history_entry(viz_state, iteration_prompt, viz_state["iteration_instruction"])
+        st.markdown('</div>', unsafe_allow_html=True)
 
+        with st.expander("Prompt 预览", expanded=False):
+            tab1, tab2, tab3, tab4 = st.tabs(["最终 Prompt", "Skills 基础稿", "优化增强稿", "硬约束"])
+            with tab1:
+                st.code(viz_state["final_prompt"], language="text")
+            with tab2:
+                st.code(viz_state.get("skill_prompt", ""), language="text")
+            with tab3:
+                st.code(viz_state.get("optimized_prompt", ""), language="text")
+            with tab4:
+                st.code(viz_state.get("hard_constraints", ""), language="text")
+        with st.expander("局部修改 Prompt 预览", expanded=False):
+            if iteration_preview_prompt:
+                st.code(iteration_preview_prompt, language="text")
+            else:
+                st.info("填写修改框后，这里会显示最终发给 Gemini 的局部修改 Prompt。")
+        with st.expander("自动逻辑摘要", expanded=False):
+            viz_state["logic_summary"] = build_viz_logic_summary(viz_state)
+            st.caption(viz_state["logic_summary"] or "填写参数后，这里会自动生成摘要。")
         with st.expander("版本历史", expanded=False):
             render_viz_history_panel(viz_state)
 
@@ -3767,11 +4016,11 @@ def render_ppt_engine() -> None:
 
     st.markdown(
         """
-<div class="workbench-card compact">
-    <div class="workbench-title">
+<div class="lab-thin-header">
+    <div class="lab-thin-header-row">
         <div>
-            <h3>PPT大师工作台</h3>
-            <p>围绕当前这一页完成输入提炼、模板排版、预览微调与逐页组装。</p>
+            <h3>PPT 工作台</h3>
+            <p>围绕当前页，完成输入提炼、预览微调与逐页组装。</p>
         </div>
         <span class="workbench-chip">Single-page PPT</span>
     </div>
@@ -3780,11 +4029,13 @@ def render_ppt_engine() -> None:
         unsafe_allow_html=True,
     )
 
-    panel1, panel2, panel3 = st.columns([1.05, 1.25, 0.95], gap="large")
+    panel1, panel2, panel3 = st.columns([1.0, 1.28, 0.95], gap="large")
 
     with panel1:
-        st.markdown("### Panel 1 · 输入与任务配置")
-        with st.expander("① 输入来源", expanded=True):
+        st.markdown('<div class="lab-secondary-card">', unsafe_allow_html=True)
+        st.markdown('<div class="lab-panel-label">输入与页面设置</div>', unsafe_allow_html=True)
+        st.markdown('<div class="lab-panel-note">当前页素材与控制项放在这里，保持完整但弱化展示。</div>', unsafe_allow_html=True)
+        with st.expander("输入来源", expanded=True):
             source_file = st.file_uploader("上传 PDF / Word", type=["pdf", "docx"], key="ppt_source_file")
             ppt_state["raw_text"] = st.text_area(
                 "输入文字",
@@ -3810,7 +4061,7 @@ def render_ppt_engine() -> None:
             if template_file is not None:
                 ppt_state["template_name"] = template_file.name
 
-        with st.expander("② 当前页基础信息", expanded=True):
+        with st.expander("当前页基础信息", expanded=True):
             ppt_state["page_title"] = st.text_input("当前页标题", value=ppt_state.get("page_title", ""), key="ppt_page_title")
             ppt_state["page_type"] = st.selectbox(
                 "页面类型",
@@ -3820,7 +4071,7 @@ def render_ppt_engine() -> None:
             )
             ppt_state["page_goal"] = st.text_area("本页目标", value=ppt_state.get("page_goal", ""), height=90, key="ppt_page_goal")
 
-        with st.expander("③ 原始内容与补充说明", expanded=True):
+        with st.expander("补充说明", expanded=False):
             ppt_state["extra_notes"] = st.text_area(
                 "补充说明",
                 value=ppt_state.get("extra_notes", ""),
@@ -3828,11 +4079,11 @@ def render_ppt_engine() -> None:
                 placeholder="例如：这一页重点突出实验趋势，不要写太满；保留原图；结论要先出现在右上角。",
                 key="ppt_extra_notes",
             )
-            st.caption(f"已载入图片素材：{len(ppt_state.get('uploaded_images', []))} 张 | 参考图：{len(ppt_state.get('reference_images', []))} 张")
+            st.markdown(f"<div class='lab-quiet-note'>已载入图片素材：{len(ppt_state.get('uploaded_images', []))} 张 | 参考图：{len(ppt_state.get('reference_images', []))} 张</div>", unsafe_allow_html=True)
             if ppt_state.get("uploaded_source_name"):
-                st.caption(f"文档来源：{ppt_state['uploaded_source_name']}")
+                st.markdown(f"<div class='lab-quiet-note'>文档来源：{ppt_state['uploaded_source_name']}</div>", unsafe_allow_html=True)
 
-        with st.expander("④ 生成控制项", expanded=True):
+        with st.expander("生成控制项", expanded=False):
             c1, c2 = st.columns(2)
             with c1:
                 ppt_state["text_simplify_level"] = st.selectbox("文字简化强度", ["低", "中", "高"], index=["低", "中", "高"].index(ppt_state.get("text_simplify_level", "中")), key="ppt_text_simplify_level")
@@ -3848,9 +4099,12 @@ def render_ppt_engine() -> None:
                 index=PPT_STYLE_MODES.index(ppt_state.get("style_mode", "academic-paperskills")) if ppt_state.get("style_mode", "academic-paperskills") in PPT_STYLE_MODES else 0,
                 key="ppt_style_mode",
             )
+        st.markdown('</div>', unsafe_allow_html=True)
 
     with panel2:
-        st.markdown("### Panel 2 · 当前页处理与生成")
+        st.markdown('<div class="lab-main-card">', unsafe_allow_html=True)
+        st.markdown('<div class="lab-panel-label">当前页处理</div>', unsafe_allow_html=True)
+        st.markdown('<div class="lab-panel-note">当前页的文本变体、布局适配与预览都集中在这里。</div>', unsafe_allow_html=True)
         variants = ppt_state.get("processed_text_variants") or create_local_ppt_variants(ppt_state)
         tabs = st.tabs(["原文", "精简版", "标题版", "要点版", "结论先行版"])
         variant_keys = ["原文", "精简版", "标题版", "要点版", "结论先行版"]
@@ -3858,7 +4112,7 @@ def render_ppt_engine() -> None:
             with tab:
                 st.text_area(key, value=variants.get(key, ""), height=150, disabled=True, key=f"ppt_variant_preview_{key}")
 
-        with st.expander("模板适配区", expanded=True):
+        with st.expander("模板适配", expanded=False):
             if ppt_state.get("template_analysis"):
                 analysis = ppt_state["template_analysis"]
                 st.markdown(f"**模板**：{analysis.get('filename', ppt_state.get('template_file_name', 'PPT模板'))}")
@@ -3921,10 +4175,14 @@ def render_ppt_engine() -> None:
                     ppt_state["current_slide_id"] = f"ppt-{ppt_state['generation_counter']}"
                     append_ppt_history_entry(ppt_state)
 
-        st.markdown("### 当前页预览")
+        st.markdown('<div class="lab-status-pills">' +
+            f'<span class="lab-status-pill"><strong>布局</strong>{ppt_state.get("selected_layout") or PPT_PAGE_TYPE_LAYOUTS.get(ppt_state.get("page_type", "结果页"), "结果+结论")}</span>' +
+            f'<span class="lab-status-pill"><strong>类型</strong>{ppt_state.get("page_type", "结果页")}</span>' +
+            f'<span class="lab-status-pill"><strong>输入</strong>{detect_ppt_input_mode(ppt_state)}</span>' +
+            '</div>', unsafe_allow_html=True)
         if ppt_state.get("current_slide_preview_html"):
             components.html(ppt_state["current_slide_preview_html"], height=420)
-            st.caption("标签：" + " / ".join((ppt_state.get("current_slide_struct") or {}).get("tags", [])))
+            st.markdown(f"<div class='lab-quiet-note'>标签：{' / '.join((ppt_state.get('current_slide_struct') or {}).get('tags', []))}</div>", unsafe_allow_html=True)
         else:
             st.info("尚未生成当前页。先在左侧输入素材，再点“生成当前页”。")
 
@@ -3989,9 +4247,12 @@ def render_ppt_engine() -> None:
 
         with st.expander("当前页历史", expanded=False):
             render_ppt_history_panel(ppt_state)
+        st.markdown('</div>', unsafe_allow_html=True)
 
     with panel3:
-        st.markdown("### Panel 3 · 输出与 PPT 组装")
+        st.markdown('<div class="lab-secondary-card">', unsafe_allow_html=True)
+        st.markdown('<div class="lab-panel-label">输出与 PPT 组装</div>', unsafe_allow_html=True)
+        st.markdown('<div class="lab-panel-note">导出、页序调整和组装管理都放在这里。</div>', unsafe_allow_html=True)
         assembly_pages = ppt_state.get("assembly_pages", [])
         export_ready = bool(assembly_pages)
         export_col, status_col = st.columns([1.2, 1])
@@ -4011,15 +4272,11 @@ def render_ppt_engine() -> None:
             else:
                 st.button("导出 PPTX", disabled=True, use_container_width=True, key="ppt_export_deck_missing_dep")
         with status_col:
-            if export_ready:
-                st.success("已具备导出条件")
-            else:
-                st.caption("至少先加入 1 页后才能导出")
-        st.metric("已加入页数", len(assembly_pages))
+            state_text = "已具备导出条件" if export_ready else "至少先加入 1 页后才能导出"
+            st.markdown(f"<div class='lab-quiet-note'>{state_text}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class=\"lab-status-pills\"><span class=\"lab-status-pill\"><strong>已加入页数</strong>{len(assembly_pages)}</span>{f'<span class=\"lab-status-pill\"><strong>当前页</strong>{ppt_state["current_slide_id"]}</span>' if ppt_state.get("current_slide_id") else ''}</div>", unsafe_allow_html=True)
         if not PPTX_AVAILABLE:
             st.warning("当前环境缺少 python-pptx，暂时不能导出 PPTX。先安装 requirements.txt 依赖后即可使用。")
-        if ppt_state.get("current_slide_id"):
-            st.caption(f"当前页编号：{ppt_state['current_slide_id']}")
         if not assembly_pages:
             st.info("当前还没有加入 PPT 的页面。")
         for idx, slide in enumerate(assembly_pages, start=1):
@@ -4027,7 +4284,7 @@ def render_ppt_engine() -> None:
             with st.expander(f"{idx}. {title}", expanded=False):
                 new_title = st.text_input("页面重命名", value=title, key=f"ppt_assembly_title_{slide['id']}")
                 slide["page_title"] = new_title
-                st.caption(f"类型：{slide.get('page_type', '结果页')} | 布局：{slide.get('layout_name', '结果+结论')}")
+                st.markdown(f"<div class='lab-quiet-note'>类型：{slide.get('page_type', '结果页')} | 布局：{slide.get('layout_name', '结果+结论')}</div>", unsafe_allow_html=True)
                 if slide.get("preview_html"):
                     components.html(slide["preview_html"], height=260)
                 c1, c2 = st.columns(2)
@@ -4059,6 +4316,7 @@ def render_ppt_engine() -> None:
                 use_container_width=True,
                 key="ppt_export_deck_bottom",
             )
+        st.markdown('</div>', unsafe_allow_html=True)
 
 
 def render_formatting_engine() -> None:
