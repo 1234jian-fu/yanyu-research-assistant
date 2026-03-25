@@ -378,6 +378,11 @@ CONFIG = {
         box-shadow: 0 8px 22px rgba(15, 23, 42, 0.04);
         border: 1px solid #d8e6f6;
     }
+    .viz-language-muted {
+        opacity: 0.5;
+        filter: grayscale(0.15);
+        pointer-events: none;
+    }
     .sidebar-panel {
         padding: 0.68rem 0.8rem;
         margin: 0.28rem 0 0.72rem 0;
@@ -3130,7 +3135,7 @@ def inject_custom_css() -> None:
 
 
 def render_sidebar_brand() -> None:
-    st.sidebar.markdown("<div class='xueyan-badge'>学研 · Xueyan</div>", unsafe_allow_html=True)
+    st.sidebar.markdown("<div class='xueyan-badge'>XUEYAN GOOD</div>", unsafe_allow_html=True)
 
 
 def render_sidebar_panel(title: str, note: str) -> None:
@@ -3792,6 +3797,9 @@ def render_viz_engine() -> None:
                 key="viz_label_mode",
             )
         with top2:
+            language_disabled = viz_state.get("label_mode", "无文字版") != "有文字版"
+            if language_disabled:
+                st.markdown('<div class="viz-language-muted">', unsafe_allow_html=True)
             viz_state["label_language"] = st.radio(
                 "标签语言",
                 ["中文", "英文"],
@@ -3799,6 +3807,8 @@ def render_viz_engine() -> None:
                 index=0 if viz_state.get("label_language", "中文") == "中文" else 1,
                 key="viz_label_language",
             )
+            if language_disabled:
+                st.markdown('</div>', unsafe_allow_html=True)
         with top3:
             viz_state["style"] = st.selectbox(
                 "风格",
