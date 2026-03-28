@@ -11,7 +11,7 @@ anthropic==0.39.0
 requests==2.31.0
 
 # PDF 处理
-pymupdf==1.24.0
+pymupdf>=1.26.0
 
 # Word 文档处理
 python-docx==0.8.11
