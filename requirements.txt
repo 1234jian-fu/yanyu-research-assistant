@@ -2,7 +2,7 @@
 # Requires Python >=3.9,<3.14
 
 # Streamlit - 固定版本避免兼容性问题
-streamlit==1.28.0
+streamlit==1.55.0
 
 # Claude API SDK
 anthropic==0.39.0
