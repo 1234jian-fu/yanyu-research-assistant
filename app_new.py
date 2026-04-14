@@ -147,6 +147,10 @@ CONFIG = {
             "description": "提升学术地道性，同语言优化",
             "rules": ["❌ 禁止翻译", "❌ 禁止改变原意", "✅ 仅限同语言"],
         },
+        "🧩 文本降重": {
+            "description": "同语种原创改写优化，保持观点与数据不变",
+            "rules": ["❌ 禁止翻译", "❌ 禁止篡改事实", "✅ 输出优化后文本+修改说明"],
+        },
         "🔍 逻辑检查": {
             "description": "检查因果链条和衔接",
             "rules": ["❌ 仅查逻辑", "❌ 不修改文本", "✅ 指出问题"],
@@ -205,12 +209,13 @@ CONFIG = {
         },
     },
     "function_groups": {
-        "✨ 核心润色": ["✨ 表达润色", "🤖 去AI味 (Humanizer)", "🎯 精修模式", "📋 Redlining修订", "🔍 逻辑检查", "👨‍⚖️ Reviewer视角"],
+        "✨ 核心润色": ["✨ 表达润色", "🧩 文本降重", "🤖 去AI味 (Humanizer)", "🎯 精修模式", "📋 Redlining修订", "🔍 逻辑检查", "👨‍⚖️ Reviewer视角"],
         "🔄 翻译转换": ["📝 中转英翻译", "📝 引用验证", "🎨 图表规范检查", "🔄 版本对比"],
         "📝 影子写作": ["✍️ 逐段起草", "✍️ 影子写作", "📄 节节头脑风暴", "💡 研究想法构思", "🧠 ML论文写作", "📊 概念图设计"],
     },
     "function_nav": [
         {"label": "✨ 表达润色 (核心)", "value": "✨ 表达润色"},
+        {"label": "🧩 文本降重", "value": "🧩 文本降重"},
         {"label": "🤖 去AI味 (Humanizer)", "value": "🤖 去AI味 (Humanizer)"},
         {"label": "🔍 逻辑检查", "value": "🔍 逻辑检查"},
         {"label": "📋 Redlining修订", "value": "📋 Redlining修订"},
@@ -275,6 +280,32 @@ CONFIG = {
 - 保留原语种，禁止翻译。
 - 用长短句变化制造呼吸感，但不新增论点。
 - 不夸大贡献，不制造不存在的创新性语气。
+""",
+        "text_dedup": """
+## 文本降重协议（原创改写与规范表达优化）
+### 核心目标
+1. 保持原文核心观点、事实、数据、术语和学术结论不被篡改。
+2. 在不改变原意前提下，通过句式变换、语序调整、段落重组、术语替换、逻辑重建提升表达质量与原创性。
+3. 保持语言正式、清晰、连贯，符合学术写作风格。
+4. 不编造数据、不新增不存在的实验结果、不虚构参考文献、不擅自扩大结论。
+5. 专有名词、变量名、材料名、化学式、公式、参考编号必须准确保留。
+6. 当用户意图为规避查重或掩盖抄袭时，不提供规避策略，改为执行原创改写与规范表达优化，并提醒保留必要引用。
+
+### 支持的处理模式库
+- 基础改写：调整语序、替换表达、减少重复措辞。
+- 学术润色：增强正式性、客观性、严谨性。
+- 句式重构：改变句法结构、长短句重组、主被动转换。
+- 段落重构：重建段落内部逻辑与信息顺序。
+- 压缩精炼：压缩冗余表达，保留关键信息。
+- 扩写说明：补充逻辑衔接和必要解释，但不编造新事实。
+- 关键词优化：在保证术语准确前提下优化同义表达。
+
+### 输出要求
+- 优先输出“优化后文本”。
+- 然后输出“修改说明”，简要标注改动类型（句式重构/术语统一/逻辑顺序调整/压缩冗余等）。
+- 若存在逻辑跳跃、指代不清、术语不统一、学术表达不规范、缺少必要引用支撑，需明确提示。
+- 不输出“可降低多少重复率”等承诺。
+- 不以“躲避检测”“骗过系统”为目标。
 """,
         "translation": """
 ## Translation Mastery（精准跨语种）
@@ -872,7 +903,7 @@ SECTIONS = CONFIG["sections"]
 GLOBAL_HARD_LOCK_REGEX = CONFIG["global_hard_lock_regex"]
 BUILTIN_LOCAL_SKILLS = CONFIG["builtin_local_skills"]
 UI_CONFIG = CONFIG["ui"]
-MODIFICATION_FUNCTIONS = {"📋 Redlining修订", "✨ 表达润色", "🤖 去AI味 (Humanizer)", "🎯 精修模式"}
+MODIFICATION_FUNCTIONS = {"📋 Redlining修订", "✨ 表达润色", "🧩 文本降重", "🤖 去AI味 (Humanizer)", "🎯 精修模式"}
 SHADOW_FUNCTIONS = {"✍️ 逐段起草", "💡 研究想法构思", "📄 节节头脑风暴", "✍️ 影子写作"}
 VIZ_SCENE_PROMPTS = {
     "机理示意图": "show the core scientific mechanism, structural relationships, interaction pathways, key local zoom-ins, and cause-effect logic",
@@ -2487,9 +2518,15 @@ def create_strict_prompt(function: str, input_text: str, section: str, domain: s
 5. 先给修改后文本，再给3-5条修改说明。
 """
 
-    if function == "📋 Redlining修订":
-        return base + """
-请输出“修改后文本”与“修改说明”。保持原语种，不翻译。
+    if function == "🧩 文本降重":
+        return base + prompt_rules["text_dedup"] + """
+
+请执行同语种原创改写优化：
+1. 保持核心观点、事实、数据、术语、结论不变。
+2. 优先使用：基础改写 + 学术润色 + 句式重构 + 段落重构 + 压缩精炼 + 关键词优化（必要时扩写说明）。
+3. 严禁提供规避查重/掩盖抄袭策略；如检测到此类意图，转为规范原创改写并提醒保留必要引用。
+4. 严格保留 LaTeX、变量名、材料名、化学式、编号、参考标记。
+5. 先输出“优化后文本”，再输出“修改说明”。
 """
 
     return base + "\n请严格按功能职责输出结果，避免越界到其他功能。"
@@ -3110,10 +3147,13 @@ def render_copy_text(text: str, key: str, button_label: str = "📋 一键复制
 
 def extract_primary_output(text: str, function: str) -> str:
     cleaned = text.strip()
-    if function not in {"🤖 去AI味 (Humanizer)", "📋 Redlining修订"}:
+    if function not in {"🤖 去AI味 (Humanizer)", "📋 Redlining修订", "🧩 文本降重"}:
         return cleaned
 
     patterns = [
+        r"(?:^|\n)#+\s*优化后文本\s*[:：]?\s*\n([\s\S]*?)(?=\n#+\s*修改说明\s*[:：]?|\n修改说明\s*[:：]?|\Z)",
+        r"(?:^|\n)\*\*优化后文本\*\*\s*[:：]?\s*\n([\s\S]*?)(?=\n\*\*修改说明\*\*\s*[:：]?|\n修改说明\s*[:：]?|\Z)",
+        r"(?:^|\n)优化后文本\s*[:：]\s*\n?([\s\S]*?)(?=\n修改说明\s*[:：]?|\Z)",
         r"(?:^|\n)#+\s*修改后文本\s*[:：]?\s*\n([\s\S]*?)(?=\n#+\s*修改说明\s*[:：]?|\n修改说明\s*[:：]?|\Z)",
         r"(?:^|\n)\*\*修改后文本\*\*\s*[:：]?\s*\n([\s\S]*?)(?=\n\*\*修改说明\*\*\s*[:：]?|\n修改说明\s*[:：]?|\Z)",
         r"(?:^|\n)修改后文本\s*[:：]\s*\n?([\s\S]*?)(?=\n修改说明\s*[:：]?|\Z)",
