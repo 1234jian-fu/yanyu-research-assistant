@@ -63,9 +63,9 @@ CLAUDE_MODEL_OPTIONS = [
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 GEMINI_BASE_URL = os.getenv("GEMINI_BASE_URL", "https://new.lemonapi.site").rstrip("/")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "imagen-2.0-generate-001")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gpt-image-2")
 GEMINI_MODEL_OPTIONS = [
-    "imagen-2.0-generate-001",
+    "gpt-image-2",
     "gemini-3.1-flash-image-preview",
     "gemini-2.5-flash-image-preview",
     "gemini-2.0-flash-preview-image-generation",
@@ -1993,6 +1993,55 @@ def normalize_gemini_prompt(prompt: str) -> str:
     return cleaned
 
 
+def _is_gpt_image_model(model_name: str) -> bool:
+    return model_name.startswith("gpt-image")
+
+
+def _call_gpt_image(
+    prompt: str,
+    aspect_ratio: str = "1:1",
+    seed: int | None = None,
+) -> tuple[str, bytes, int | None]:
+    """GPT Image models use OpenAI-compatible /v1/images/generations endpoint."""
+    active_image_model = get_active_image_model()
+    size_map = {
+        "1:1": "1024x1024",
+        "16:9": "1792x1024",
+        "9:16": "1024x1792",
+        "4:3": "1024x1024",
+        "3:4": "1024x1024",
+    }
+    size = size_map.get(aspect_ratio, "1024x1024")
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {GEMINI_API_KEY}",
+    }
+    payload = {
+        "model": active_image_model,
+        "prompt": prompt,
+        "n": 1,
+        "size": size,
+        "response_format": "b64_json",
+    }
+    resp = requests.post(
+        f"{GEMINI_BASE_URL}/v1/images/generations",
+        json=payload,
+        headers=headers,
+        timeout=120,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    images = data.get("data") or []
+    if not images:
+        raise ValueError(f"GPT Image returned no images: {json.dumps(data, ensure_ascii=False)[:500]}")
+    b64_data = images[0].get("b64_json", "")
+    if not b64_data:
+        raise ValueError(f"GPT Image missing b64_json: {json.dumps(images[0], ensure_ascii=False)[:300]}")
+    image_bytes = base64.b64decode(b64_data)
+    image_url = f"data:image/png;base64,{b64_data}"
+    return image_url, image_bytes, seed
+
+
 def call_gemini_image(
     prompt: str,
     aspect_ratio: str = "1:1",
@@ -2004,6 +2053,10 @@ def call_gemini_image(
     style_strength: float | None = None,
 ) -> tuple[str, bytes | None, int | None]:
     active_image_model = get_active_image_model()
+
+    if _is_gpt_image_model(active_image_model):
+        return _call_gpt_image(prompt, aspect_ratio=aspect_ratio, seed=seed)
+
     safe_prompt = normalize_gemini_prompt(prompt)
     parts = [{"text": safe_prompt}]
     if reference_image_bytes:
