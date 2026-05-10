@@ -18,7 +18,6 @@ from io import BytesIO
 from pathlib import Path
 from typing import Dict, List, Tuple
 
-import anthropic
 import fitz  # pymupdf
 import requests
 import streamlit as st
@@ -29,6 +28,8 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Cm, Pt, RGBColor
+from services.text_ai import MissingTextModelCredentials, call_text_model
+from utils.exports import build_export_filename, create_docx, create_docx_with_redlines
 try:
     from pptx import Presentation
     from pptx.enum.shapes import MSO_AUTO_SHAPE_TYPE
@@ -44,7 +45,6 @@ except ModuleNotFoundError:
 
     def PptxPt(value):
         return value
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 # ── Configuration ────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -2587,87 +2587,18 @@ def create_strict_prompt(function: str, input_text: str, section: str, domain: s
 
 
 
-def get_client():
-    if not CLAUDE_API_KEY:
+def call_api(prompt: str, timeout: int = 300) -> str:
+    try:
+        return call_text_model(
+            prompt=prompt,
+            api_key=CLAUDE_API_KEY,
+            base_url=CLAUDE_BASE_URL,
+            model=get_active_text_model(),
+            timeout=timeout,
+        )
+    except MissingTextModelCredentials:
         st.error("❌ 未检测到 ANTHROPIC_AUTH_TOKEN")
         st.stop()
-    return anthropic.Anthropic(
-        api_key=CLAUDE_API_KEY,
-        base_url=CLAUDE_BASE_URL if CLAUDE_BASE_URL != "https://api.anthropic.com" else None,
-    )
-
-
-@retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=4, max=60),
-    retry=retry_if_exception_type((anthropic.APITimeoutError, anthropic.InternalServerError)),
-)
-def call_api(prompt: str, timeout: int = 300) -> str:
-    client = get_client()
-    active_text_model = get_active_text_model()
-    message = client.messages.create(
-        model=active_text_model,
-        max_tokens=8192,
-        temperature=0.2,
-        timeout=timeout,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    return "".join(block.text for block in message.content if getattr(block, "type", "") == "text")
-
-
-def create_docx_with_redlines(original: str, revised: str, metadata: dict) -> bytes:
-    doc = Document()
-    doc.add_heading(f"学研·修订模式 - {metadata['function']}", 0)
-    info = doc.add_paragraph()
-    info.add_run(f"板块: {metadata.get('section', '未指定')}\n")
-    info.add_run(f"领域: {metadata.get('domain', '未指定')}\n")
-    info.add_run(f"时间: {metadata.get('timestamp', '')}\n")
-    doc.add_heading("原文", 1)
-    doc.add_paragraph(original)
-    doc.add_heading("修改后", 1)
-    doc.add_paragraph(revised)
-    doc.add_heading("修改说明", 2)
-    original_words = set(original.lower().split())
-    revised_words = set(revised.lower().split())
-    added = revised_words - original_words
-    removed = original_words - revised_words
-    if added:
-        p = doc.add_paragraph()
-        run = p.add_run("新增词汇: ")
-        run.font.color.rgb = RGBColor(0, 128, 0)
-        p.add_run(", ".join(list(added)[:20]))
-    if removed:
-        p = doc.add_paragraph()
-        run = p.add_run("删除词汇: ")
-        run.font.color.rgb = RGBColor(255, 0, 0)
-        p.add_run(", ".join(list(removed)[:20]))
-    buffer = BytesIO()
-    doc.save(buffer)
-    buffer.seek(0)
-    return buffer.read()
-
-
-def create_docx(content: str, metadata: dict) -> bytes:
-    doc = Document()
-    doc.add_heading(f"学研·工科科研助手 - {metadata.get('function', '导出')}", 0)
-    info = doc.add_paragraph()
-    for key in ("section", "domain", "timestamp"):
-        if metadata.get(key):
-            info.add_run(f"{key}: {metadata[key]}\n")
-    doc.add_heading("处理结果", 1)
-    doc.add_paragraph(content)
-    buffer = BytesIO()
-    doc.save(buffer)
-    buffer.seek(0)
-    return buffer.read()
-
-
-def build_export_filename(prefix: str, name_hint: str, suffix: str = ".docx") -> str:
-    safe_name = re.sub(r"[^\w\u4e00-\u9fff.-]+", "_", (name_hint or "document").strip())
-    safe_name = safe_name.strip("._") or "document"
-    if not safe_name.lower().endswith(suffix):
-        safe_name = f"{safe_name}{suffix}"
-    return f"{prefix}_{safe_name}"
 
 
 def ensure_guideline_rules(guideline_text: str, guideline_file=None) -> Dict:

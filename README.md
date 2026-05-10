@@ -42,7 +42,7 @@ git push -u origin main
    - **Main file path**: `app_new.py`
 5. **环境变量**（Secrets）：
    ```
-   ANTHROPIC_AUTH_TOKEN=sk-your-api-key-here
+   ANTHROPIC_AUTH_TOKEN=your-api-key-here
    ANTHROPIC_BASE_URL=https://aiapi.aixia.tech
    ANTHROPIC_MODEL=claude-sonnet-4-6
    ```

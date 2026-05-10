@@ -28,8 +28,12 @@ CLAUDE_BASE_URL = os.getenv("CLAUDE_BASE_URL", "https://aiapi.aixia.tech/v1").rs
 CLAUDE_MODEL = "claude-sonnet-4-6"
 
 # Gemini API 配置 (绘图模型)
-GEMINI_API_KEY = "sk-bw08yrg3DOCNqjFSlXjnm5o3QOwcZo4B31STzzrLddpibmCp"
-GEMINI_BASE_URL = "https://new.lemonapi.site/v1"
+try:
+    GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+except (FileNotFoundError, KeyError):
+    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+
+GEMINI_BASE_URL = os.getenv("GEMINI_BASE_URL", "https://new.lemonapi.site/v1").rstrip("/")
 GEMINI_MODEL = "gemini-3-flash"
 
 SCALE_OPTIONS = ["微观晶格", "界面机理", "介观形貌", "宏观器件"]

@@ -13,5 +13,11 @@ pymupdf>=1.24.0
 # Word 文档处理
 python-docx>=0.8.11
 
+# HTTP 请求
+requests>=2.31.0
+
+# PPT 导出
+python-pptx>=1.0.0
+
 # 重试机制
 tenacity>=8.2.0
