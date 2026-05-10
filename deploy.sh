@@ -1,4 +1,4 @@
-#!/bin/bash
+﻿#!/bin/bash
 # 研语·工科科研助手 v4.0 - 一键部署脚本
 
 echo "🧪 研语·工科科研助手 v4.0 - 部署向导"
@@ -44,9 +44,9 @@ case $choice in
         read username
 
         echo ""
-        echo "请输入仓库名称 (默认: yanyu-research-assistant):"
+        echo "请输入仓库名称 (默认: xueyan-research-assistant):"
         read reponame
-        reponame=${reponame:-yanyu-research-assistant}
+        reponame=${reponame:-xueyan-research-assistant}
 
         # 创建远程仓库
         echo ""

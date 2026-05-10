@@ -1,4 +1,4 @@
-# 🚀 研语·工科科研助手 - 零基础部署指南
+﻿# 🚀 研语·工科科研助手 - 零基础部署指南
 
 ## 📖 准备工作（开始前必读）
 
@@ -49,7 +49,7 @@ imgweb/
 1. 登录后，点击右上角的 **"+"** 号
 2. 选择 **"New repository"**
 3. 填写信息：
-   - **Repository name**: `yanyu-research-assistant`（或你喜欢的名字）
+   - **Repository name**: `xueyan-research-assistant`（或你喜欢的名字）
    - **Description**: `研语·工科科研助手 - 15+功能矩阵科研写作工具`
    - 选择 **"Public"**（公开）
    - ⚠️ **不要**勾选 "Add a README file"
@@ -60,7 +60,7 @@ imgweb/
 
 创建后，你会看到一个页面，复制你的仓库地址：
 ```
-https://github.com/你的用户名/yanyu-research-assistant.git
+https://github.com/你的用户名/xueyan-research-assistant.git
 ```
 记住这个地址！
 
@@ -98,7 +98,7 @@ git init
 git add .
 git commit -m "YanYu v4.0 - 工科科研助手"
 git branch -M main
-git remote add origin https://github.com/你的用户名/yanyu-research-assistant.git
+git remote add origin https://github.com/你的用户名/xueyan-research-assistant.git
 git push -u origin main
 ```
 
@@ -133,7 +133,7 @@ git push -u origin main
 
 1. 登录后，点击右上角 **"New app"**
 2. 填写信息：
-   - **Repository**: 点击下拉框，选择 `yanyu-research-assistant`
+   - **Repository**: 点击下拉框，选择 `xueyan-research-assistant`
    - **Branch**: 选择 `main`
    - **Main file path**: 输入 `app_new.py`
 3. 点击 **"Advanced settings"**
@@ -186,7 +186,7 @@ This usually takes 2-3 minutes.
 
 并且有一个链接，比如：
 ```
-https://yanyu-research-assistant.streamlit.app
+https://xueyan-research-assistant.streamlit.app
 ```
 
 ### 5.3 测试应用
@@ -208,7 +208,7 @@ https://你的仓库名.streamlit.app
 
 例如：
 ```
-https://yanyu-research-assistant.streamlit.app
+https://xueyan-research-assistant.streamlit.app
 ```
 
 ### 6.2 分享给他人

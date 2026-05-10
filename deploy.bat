@@ -1,4 +1,4 @@
-@echo off
+﻿@echo off
 REM 研语·工科科研助手 v4.0 - Windows 部署脚本
 
 echo =====================================
@@ -53,8 +53,8 @@ echo.
 echo 步骤 3：连接 GitHub
 echo -------------------
 set /p username="请输入你的 GitHub 用户名: "
-set /p reponame="请输入仓库名称 (默认: yanyu-research-assistant): "
-if "%reponame%"=="" set reponame=yanyu-research-assistant
+set /p reponame="请输入仓库名称 (默认: xueyan-research-assistant): "
+if "%reponame%"=="" set reponame=xueyan-research-assistant
 
 echo.
 echo 在浏览器中打开以下链接创建仓库：
